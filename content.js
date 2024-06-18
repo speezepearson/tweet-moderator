@@ -3,16 +3,18 @@ console.log('hello');
 let numCalls = 0;
 const tweetToxicityCache = {};
 async function isTweetToxic(text) {
-    numCalls++;
-    if (numCalls > 10) { return true; }
     if (tweetToxicityCache[text] !== undefined) {
         if (tweetToxicityCache[text] === 'loading') { return; }
-        console.log('Cache hit for tweet:', text);
+        // console.log('Cache hit for tweet:', text);
         return tweetToxicityCache[text];
     }
     tweetToxicityCache[text] = 'loading';
 
-    console.log('Moderating tweet:', text);
+    numCalls++;
+    // if (numCalls > 10) { return true; }
+    // console.log({numCalls, text});
+
+    // console.log('Moderating tweet:', text);
     try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -25,7 +27,7 @@ async function isTweetToxic(text) {
                 messages: [
                   {
                     role: 'system',
-                    content: `You are Tweet Moderator. Tweet Moderator evaluates tweets for potentially inflammatory or divisive content. It checks whether the tweet seems to provoke anger, takes sides on a political issue, accuses others of morally objectionable beliefs, or is written in an angry tone that discourages disagreement. The goal is to help users identify and avoid tweets that could be perceived as harmful or provocative. Tweet Moderator should be cautious and avoid making definitive judgments, instead providing suggestions and highlighting potential issues. It should be empathetic, neutral, and aim to promote constructive dialogue. After analysis, it will conclude with 'YES' or 'NO' to indicate if the tweet does any of these 'bad' things.`,
+                    content: `You are Tweet Moderator. Tweet Moderator evaluates tweets for potentially inflammatory or divisive content. It checks whether the tweet seems to provoke anger, takes sides on a political issue, accuses others of morally objectionable beliefs, or is written in an angry tone that discourages disagreement. It should think as much as it needs to in order to come to the correct conclusion, and end its response with 'YES' or 'NO' to indicate if the tweet does any of these 'bad' things.`,
                   },
                   {
                     role: 'user',
@@ -37,11 +39,10 @@ async function isTweetToxic(text) {
               })
         });
         const responseJ = await response.json();
-        console.log({responseJ});
         const responseText = responseJ.choices[0].message.content;
         const result = responseText.trim().endsWith('YES') || responseText.trim().endsWith('YES.');
         tweetToxicityCache[text] = result;
-        console.log('Tweet', text, 'is toxic?', result);
+        console.log({text, response: responseJ, toxic: result});
         return result;
     } catch (error) {
         console.error('Error moderating tweet:', error);
@@ -64,6 +65,7 @@ function getTweets() {
 
 // Function to moderate a tweet by sending it to the GPT endpoint
 async function moderateTweet(tweet) {
+  // console.log('Moderating tweet:', tweet)
   if (await isTweetToxic(tweet)) {
     highlightTweet(tweet);
   }
@@ -71,7 +73,7 @@ async function moderateTweet(tweet) {
 
 // Function to highlight a tweet in red
 function highlightTweet(tweetText) {
-  debugger;
+  // debugger;
   const tweets = document.getElementsByClassName(tweetClass);
   Array.from(tweets).forEach(tweet => {
     if (tweet.innerText === tweetText) {
@@ -83,13 +85,11 @@ function highlightTweet(tweetText) {
 // Function to process all tweets on the page
 async function processTweets() {
   const tweets = getTweets();
-  for (const tweet of tweets) {
-    await moderateTweet(tweet);
-  }
+  await Promise.all(tweets.map(moderateTweet));
 }
 
 // Run the function on page load
 window.addEventListener('load', processTweets);
 
 // Optional: Run the function periodically to catch dynamically loaded tweets
-setTimeout(processTweets, 5000);
+setInterval(processTweets, 5000);
