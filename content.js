@@ -1,21 +1,19 @@
 console.log('hello');
 
-let numCalls = 0;
-const tweetToxicityCache = {};
+/** @type {Map<Element, boolean>} */
+const tweetToxicityCache = new Map();
+/**
+ * @param {string} text
+ * @returns {Promise<boolean>}
+ */
 async function isTweetToxic(text) {
-    if (tweetToxicityCache[text] !== undefined) {
-        if (tweetToxicityCache[text] === 'loading') { return; }
-        // console.log('Cache hit for tweet:', text);
-        return tweetToxicityCache[text];
+    const cachedValue = tweetToxicityCache.get(text);
+    if (cachedValue !== undefined) {
+        return cachedValue;
     }
-    tweetToxicityCache[text] = 'loading';
 
-    numCalls++;
-    // if (numCalls > 10) { return true; }
-    // console.log({numCalls, text});
-
-    // console.log('Moderating tweet:', text);
     try {
+      console.log('checking', text)
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -41,7 +39,7 @@ async function isTweetToxic(text) {
         const responseJ = await response.json();
         const responseText = responseJ.choices[0].message.content;
         const result = responseText.trim().endsWith('YES') || responseText.trim().endsWith('YES.');
-        tweetToxicityCache[text] = result;
+        tweetToxicityCache.set(text, result);
         console.log({text, response: responseJ, toxic: result});
         return result;
     } catch (error) {
@@ -50,46 +48,40 @@ async function isTweetToxic(text) {
     }
 }
 
+/** @type {Set<Element>} */
+const processedTweets = new Set();
+/**
+ * @param {Element} tweetNode
+ * @returns {Promise<void>}
+ */
+async function checkTweet(tweetNode) {
+  
+  if (processedTweets.has(tweetNode)) {
+    return;
+  }
+  processedTweets.add(tweetNode); // add at beginning rather than end of func to prevent other calls from making API calls for it as well
 
-
-
-
-
-
-const tweetClass = 'r-8akbws';
-
-// Function to extract tweet texts
-function getTweets() {
-  return Array.from(document.getElementsByClassName(tweetClass)).map(tweet => tweet.innerText);
-}
-
-// Function to moderate a tweet by sending it to the GPT endpoint
-async function moderateTweet(tweet) {
-  // console.log('Moderating tweet:', tweet)
-  if (await isTweetToxic(tweet)) {
-    highlightTweet(tweet);
+  if (await isTweetToxic(tweetNode.innerText)) {
+    tweetNode.style.color = 'red';
   }
 }
 
-// Function to highlight a tweet in red
-function highlightTweet(tweetText) {
-  // debugger;
-  const tweets = document.getElementsByClassName(tweetClass);
-  Array.from(tweets).forEach(tweet => {
-    if (tweet.innerText === tweetText) {
-      tweet.style.color = 'red';
-    }
-  });
+
+/**
+ * @param {Element} node 
+ * @returns {boolean}
+ */
+function isTweetNode(node) {
+  return node.getAttribute('data-testid') === 'tweetText'
 }
 
-// Function to process all tweets on the page
-async function processTweets() {
-  const tweets = getTweets();
-  await Promise.all(tweets.map(moderateTweet));
+const tweetClass = 'r-8akbws';
+async function findAndProcessAllTweets() {
+  let tweets = Array.from(document.getElementsByClassName(tweetClass));
+  console.log('found', tweets.length, 'maybe-tweets');
+  tweets = tweets.filter(isTweetNode);
+  console.log('found', tweets.length, 'confirmed tweets');
+  await Promise.all(tweets.map(checkTweet));
 }
 
-// Run the function on page load
-window.addEventListener('load', processTweets);
-
-// Optional: Run the function periodically to catch dynamically loaded tweets
-setInterval(processTweets, 5000);
+setInterval(findAndProcessAllTweets, 1000);
