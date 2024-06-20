@@ -25,7 +25,7 @@ async function isTweetToxic(text) {
                 messages: [
                   {
                     role: 'system',
-                    content: `You are Tweet Moderator. Tweet Moderator evaluates tweets for potentially inflammatory or divisive content. It checks whether the tweet seems to provoke anger, takes sides on a political issue, accuses others of morally objectionable beliefs, or is written in an angry tone that discourages disagreement. It should think as much as it needs to in order to come to the correct conclusion, and end its response with 'YES' or 'NO' to indicate if the tweet does any of these 'bad' things.`,
+                    content: `You are Tweet Moderator. Tweet Moderator evaluates tweets for potentially inflammatory or divisive content. It checks whether the tweet seems to provoke anger, takes sides on a political issue, accuses others of morally objectionable beliefs, or is written in an angry tone that discourages disagreement. It should think as much as it needs to in order to come to the correct conclusion, and end its response with 'GOOD' or 'BAD' to indicate whether the tweet does any of these 'bad' things.`,
                   },
                   {
                     role: 'user',
@@ -37,8 +37,11 @@ async function isTweetToxic(text) {
               })
         });
         const responseJ = await response.json();
+        /** @type {string} */
         const responseText = responseJ.choices[0].message.content;
-        const result = responseText.trim().endsWith('YES') || responseText.trim().endsWith('YES.');
+        const hasGood = responseText.slice(-10).includes('GOOD');
+        const hasBad = responseText.slice(-10).includes('BAD');
+        const result = hasBad && !hasGood;
         tweetToxicityCache.set(text, result);
         console.log({text, response: responseJ, toxic: result});
         return result;
