@@ -94,8 +94,24 @@ async function checkTweet(tweetNode) {
   processedTweets.add(tweetNode); // add at beginning rather than end of func to prevent other calls from making API calls for it as well
 
   if (await isTweetToxic(tweetNode.innerText)) {
-    tweetNode.style.color = 'red';
+    let parentArticle = getParentArticle(tweetNode);
+    if (parentArticle) {
+      parentArticle.remove();
+    }
   }
+}
+
+/**
+ * @param {Element} node
+ * @returns {Element}
+ */
+function getParentArticle(node) {
+  let parentArticle = node;
+  while (parentArticle && parentArticle.tagName !== 'ARTICLE') {
+    parentArticle = parentArticle.parentElement;
+  }
+  return parentArticle;
+
 }
 
 
