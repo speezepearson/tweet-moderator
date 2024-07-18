@@ -9,3 +9,4 @@ To install:
     - puzzle piece in the top right of the Chrome taskbar -> kebab menu by "Tweet Moderator" -> "Options"
   - enter an API key
   - hit Save
+- visit https://x.com and watch the bad stuff vanish, hopefully before it can getcha
