@@ -1,4 +1,5 @@
 To install:
+- Clone this repo.
 - [Load this folder as an unpacked extension](https://support.google.com/chrome/a/answer/2714278?hl=en#:~:text=Test%20the%20app%20or%20extension). Currently, that means:
   - open chrome://extensions
   - turn on developer mode in the top right
