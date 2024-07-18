@@ -35,6 +35,12 @@ document.addEventListener('DOMContentLoaded', function () {
     chrome.storage.sync.set({ tweetPrefix }, function () {
       alert('Settings saved');
     });
+    const openaiApiKey = form.openaiApiKey.value;
+    if (openaiApiKey) {
+      chrome.storage.sync.set({ openaiApiKey }, function () {
+        alert('API key saved');
+      });
+    }
     return false;
   });
 });

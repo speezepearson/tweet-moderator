@@ -21,6 +21,9 @@ Here is the tweet:
 async function getTweetPrefix() {
   return chrome.storage.sync.get(['tweetPrefix']).then(({tweetPrefix}) => tweetPrefix || defaultSettings.tweetPrefix)
 }
+async function getOpenaiApiKey() {
+  return chrome.storage.sync.get(['openaiApiKey']).then(({openaiApiKey}) => openaiApiKey)
+}
 // END COPYPASTA
 
 /** @type {Map<Element, boolean>} */
@@ -35,13 +38,16 @@ async function isTweetToxic(text) {
         return cachedValue;
     }
 
+    const openaiApiKey = await getOpenaiApiKey();
+    if (!openaiApiKey) return false;
+
     try {
       console.log('checking', text)
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': 'Bearer sk-proj-nBMjZZQle5T1sKUm6b8dT3BlbkFJIV25Th8XCAyWq4tMnB8c',
+                'Authorization': `Bearer ${openaiApiKey}`,
             },
             body: JSON.stringify({
                 model: 'gpt-4o',
