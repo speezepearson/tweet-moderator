@@ -1,4 +1,27 @@
-console.log('hello');
+// COPYPASTA
+const defaultSettings = {
+  tweetPrefix: `
+You are Tweet Moderator.
+You evaluate tweets for inflammatory content.
+I'm going to give you a tweet. Please check whether it does any of the following:
+- seems likely to provoke anger / outrage / indignation
+- takes sides on a political issue
+- accuses others of morally objectionable beliefs
+- is written in an angry tone that discourages disagreement
+
+(Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
+There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
+Then end your response with 'GOOD' or 'BAD' to indicate whether the tweet does any of these 'bad' things.)
+
+
+Here is the tweet:
+
+`,
+};
+async function getTweetPrefix() {
+  return chrome.storage.sync.get(['tweetPrefix']).then(({tweetPrefix}) => tweetPrefix || defaultSettings.tweetPrefix)
+}
+// END COPYPASTA
 
 /** @type {Map<Element, boolean>} */
 const tweetToxicityCache = new Map();
@@ -23,13 +46,13 @@ async function isTweetToxic(text) {
             body: JSON.stringify({
                 model: 'gpt-4o',
                 messages: [
-                  {
-                    role: 'system',
-                    content: `You are Tweet Moderator. Tweet Moderator evaluates tweets for potentially inflammatory or divisive content. It checks whether the tweet seems to provoke anger, takes sides on a political issue, accuses others of morally objectionable beliefs, or is written in an angry tone that discourages disagreement. It should think as much as it needs to in order to come to the correct conclusion, and end its response with 'GOOD' or 'BAD' to indicate whether the tweet does any of these 'bad' things.`,
-                  },
+                  // {
+                  //   role: 'system',
+                  //   content: await getSystemPrompt(),
+                  // },
                   {
                     role: 'user',
-                    content: `Tweet: ${text}`,
+                    content: (await getTweetPrefix()) + text,
                   },
                 ],
                 temperature: 0.7,
@@ -43,7 +66,7 @@ async function isTweetToxic(text) {
         const hasBad = responseText.slice(-10).includes('BAD');
         const result = hasBad && !hasGood;
         tweetToxicityCache.set(text, result);
-        console.log({text, response: responseJ, toxic: result});
+        console.log({text, responseText, response: responseJ, toxic: result});
         return result;
     } catch (error) {
         console.error('Error moderating tweet:', error);
