@@ -10,3 +10,5 @@ To install:
   - enter an API key
   - hit Save
 - visit https://x.com and watch the bad stuff vanish, hopefully before it can getcha
+
+Anecdotally, I visit Twitter a few times a day and this costs me a couple bucks a month.
