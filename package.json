@@ -1,0 +1,12 @@
+{
+  "name": "tweet-moderator",
+  "packageManager": "yarn@4.3.0",
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "typescript": "^5.5.3"
+  },
+  "scripts": {
+    "build": "tsc && cp src/*.html dist/",
+    "watch": "tsc -w"
+  }
+}
