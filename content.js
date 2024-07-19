@@ -22,10 +22,73 @@ Here is the tweet:
 async function getTweetPrefix() {
   return chrome.storage.sync.get(['tweetPrefix']).then(({tweetPrefix}) => tweetPrefix || defaultSettings.tweetPrefix)
 }
+// END COPYPASTA
+
 async function getOpenaiApiKey() {
   return chrome.storage.sync.get(['openaiApiKey']).then(({openaiApiKey}) => openaiApiKey)
 }
-// END COPYPASTA
+
+/** @typedef {string} TweetHash */
+/**
+ * @param {string} tweet
+ * @returns {Promise<TweetHash>}
+ */
+async function hashTweet(tweet) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(tweet);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return tweet.slice(0, 100) + ' ' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** @typedef {Object.<string, {lastUpdatedMs: number, results: boolean[]}>} TweetToxicityCache */
+
+
+/**
+ * @returns {Promise<TweetToxicityCache>}
+ */
+async function getTweetToxicityCache() {
+  return chrome.storage.local.get(['tweetToxicity']).then(({tweetToxicity}) => tweetToxicity || {})
+}
+
+/**
+ * @param {string} tweet
+ * @returns {undefined|Promise<boolean>}
+ */
+async function getStoredTweetToxicity(tweet) {
+  const cache = await getTweetToxicityCache();
+  const cacheKey = await hashTweet(tweet);
+  const info = cache[cacheKey];
+  if (info === undefined) {
+    return undefined;
+  }
+  const nYes = info.results.filter(x => x).length;
+  const nNo = info.results.length - nYes;
+  if (nYes > 1) return true;
+  if (nNo > 1) return false;
+  return undefined;
+}
+/**
+ * @param {string} tweet
+ * @param {boolean} isToxic
+ */
+async function recordTweetToxicity(tweet, isToxic) {
+  const cache = await getTweetToxicityCache();
+  const cacheKey = await hashTweet(tweet);
+  let cachedInfo = cache[cacheKey];
+  if (!cachedInfo) {
+    cachedInfo = {lastUpdatedMs: Date.now(), results: []};
+  }
+  cachedInfo.results.push(isToxic);
+
+  // while the cache is too big, remove the oldest entry
+  while (JSON.stringify(cache).length > 500000) {
+    const oldestTweet = Object.entries(cache).reduce((a, b) => a[1].lastUpdatedMs < b[1].lastUpdatedMs ? a : b)[0];
+    delete cache[oldestTweet];
+  }
+
+  await chrome.storage.local.set({tweetToxicity: {...cache, [cacheKey]: cachedInfo}});
+}
 
 /** @type {Map<Element, boolean>} */
 const tweetToxicityCache = new Map();
@@ -37,6 +100,10 @@ async function isTweetToxic(text) {
     const cachedValue = tweetToxicityCache.get(text);
     if (cachedValue !== undefined) {
         return cachedValue;
+    }
+    const storedValue = await getStoredTweetToxicity(text);
+    if (storedValue !== undefined) {
+      return storedValue;
     }
 
     const openaiApiKey = await getOpenaiApiKey();
@@ -73,6 +140,7 @@ async function isTweetToxic(text) {
         const hasBad = responseText.slice(-10).includes('INFLAMMATORY');
         const result = hasBad && !hasGood;
         tweetToxicityCache.set(text, result);
+        await recordTweetToxicity(text, result);
         console.log({text, responseText, response: responseJ, toxic: result});
         return result;
     } catch (error) {
@@ -127,9 +195,7 @@ function isTweetNode(node) {
 const tweetClass = 'r-8akbws';
 async function findAndProcessAllTweets() {
   let tweets = Array.from(document.getElementsByClassName(tweetClass));
-  console.log('found', tweets.length, 'maybe-tweets');
   tweets = tweets.filter(isTweetNode);
-  console.log('found', tweets.length, 'confirmed tweets');
   await Promise.all(tweets.map(checkTweet));
 }
 
