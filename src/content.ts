@@ -1,5 +1,9 @@
 // COPYPASTA
 // @ts-ignore
+const keywords = { good: 'DOES NOT DO THE ABOVE', bad: 'DOES THE ABOVE' };
+// @ts-ignore
+const maxKeywordLength = Math.max(...Object.values(keywords).map(v => v.length));
+// @ts-ignore
 const defaultSettings = {
   tweetPrefix: `
 You are Tweet Moderator.
@@ -13,7 +17,7 @@ I'm going to give you a tweet. Please check whether it does any of the following
 
 (Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
 There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
-Then end your response with 'INFLAMMATORY' or 'SAFE' indicating whether the tweet does any of these things.)
+Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
 
 
 Here is the tweet:
@@ -125,14 +129,13 @@ async function isTweetToxic(text: Tweet): Promise<boolean> {
       })
     });
     const responseJ = await response.json();
-    /** @type {string} */
     const responseText = responseJ.choices[0].message.content;
-    const hasGood = responseText.slice(-10).includes('GOOD');
-    const hasBad = responseText.slice(-10).includes('BAD');
+    const hasGood = responseText.slice(-(maxKeywordLength + 5)).includes(keywords.good);
+    const hasBad = responseText.slice(-(maxKeywordLength + 5)).includes(keywords.bad);
     const result = hasBad && !hasGood;
     tweetToxicityCache.set(text, result);
     await recordTweetToxicity(text, result);
-    console.log({ text, responseText, response: responseJ, toxic: result });
+    console.log({ text, responseText, response: responseJ, toxic: result, slice: responseText.slice(-(maxKeywordLength + 5)), bad: keywords.bad });
     return result;
   } catch (error) {
     console.error('Error moderating tweet:', error);
