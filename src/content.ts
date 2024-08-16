@@ -156,7 +156,7 @@ async function checkTweet(tweetNode: HTMLElement): Promise<void> {
     let parentArticle = getParentArticle(tweetNode);
     if (parentArticle) {
       console.log('removing', tweetNode.innerText);
-      parentArticle.remove();
+      parentArticle.style.display = 'none';
     }
   }
 }

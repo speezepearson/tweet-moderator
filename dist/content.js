@@ -160,7 +160,7 @@ function checkTweet(tweetNode) {
             let parentArticle = getParentArticle(tweetNode);
             if (parentArticle) {
                 console.log('removing', tweetNode.innerText);
-                parentArticle.remove();
+                parentArticle.style.display = 'none';
             }
         }
     });
