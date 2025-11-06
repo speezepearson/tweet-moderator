@@ -1,57 +1,64 @@
-// COPYPASTA
-// @ts-ignore
-const keywords = { good: 'DOES NOT DO THE ABOVE', bad: 'DOES THE ABOVE' };
-// @ts-ignore
-const maxKeywordLength = Math.max(...Object.values(keywords).map(v => v.length));
-// @ts-ignore
-const defaultSettings = {
-  tweetPrefix: `
-You are Tweet Moderator.
-You evaluate tweets for inflammatory content.
-I'm going to give you a tweet. Please check whether it does any of the following:
-- seems likely to provoke anger / outrage / indignation
-- employs sarcasm
-- takes sides on a political issue
-- accuses others of morally objectionable beliefs
-- is written in an angry tone that discourages disagreement
+import { getTweetPrefix, saveSettings } from './lib';
 
-(Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
-There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
-Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
+/**
+ * Options page script for the Tweet Moderator extension
+ * Handles settings UI and storage
+ */
 
+document.addEventListener('DOMContentLoaded', async () => {
+  const form = document.getElementById('settings-form');
+  if (!form || !(form instanceof HTMLFormElement)) {
+    console.error('Settings form not found');
+    return;
+  }
 
-Here is the tweet:
+  // Type-safe form field access
+  const tweetPrefixField = form.elements.namedItem('tweetPrefix');
+  const apiKeyField = form.elements.namedItem('openaiApiKey');
 
-`,
-};
-// @ts-ignore
-async function getTweetPrefix(): Promise<string> {
-  return chrome.storage.sync.get(['tweetPrefix']).then(({ tweetPrefix }) => tweetPrefix || defaultSettings.tweetPrefix)
-}
-// END COPYPASTA
+  if (
+    !tweetPrefixField ||
+    !(tweetPrefixField instanceof HTMLTextAreaElement) ||
+    !apiKeyField ||
+    !(apiKeyField instanceof HTMLInputElement)
+  ) {
+    console.error('Form fields not found or have incorrect types');
+    return;
+  }
 
-document.addEventListener('DOMContentLoaded', function () {
-  const form = document.getElementById('settings-form') as HTMLFormElement;
-  if (!form) return;
+  // Load current settings
+  try {
+    const currentPrefix = await getTweetPrefix();
+    tweetPrefixField.value = currentPrefix;
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
 
-  getTweetPrefix().then(p => form.tweetPrefix.value = p);
-
-  // Save settings
-  form.addEventListener('submit', function (event) {
+  // Save settings on form submit
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
 
-    const tweetPrefix = form.tweetPrefix.value;
-    chrome.storage.sync.set({ tweetPrefix }, function () {
-      alert('Settings saved');
-    });
+    const tweetPrefix = tweetPrefixField.value.trim();
+    const openaiApiKey = apiKeyField.value.trim();
 
-    const openaiApiKey = form.openaiApiKey.value;
-    if (openaiApiKey) {
-      chrome.storage.sync.set({ openaiApiKey }, function () {
-        alert('API key saved');
-      });
+    if (!tweetPrefix) {
+      alert('Tweet prefix cannot be empty');
+      return;
     }
 
-    return false;
+    try {
+      await saveSettings({
+        tweetPrefix,
+        ...(openaiApiKey ? { openaiApiKey } : {}),
+      });
+
+      alert('Settings saved successfully');
+
+      // Clear the API key field after saving for security
+      apiKeyField.value = '';
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert(`Failed to save settings: ${error instanceof Error ? error.message : String(error)}`);
+    }
   });
 });
