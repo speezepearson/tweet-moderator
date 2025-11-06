@@ -12653,6 +12653,19 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
   };
 
+  // src/storage.ts
+  async function getLocalStorage(keysOrKey) {
+    const keys = Array.isArray(keysOrKey) ? keysOrKey : [keysOrKey];
+    return chrome.storage.local.get(keys);
+  }
+  async function setLocalStorage(items) {
+    return chrome.storage.local.set(items);
+  }
+  async function getSyncStorage(keysOrKey) {
+    const keys = Array.isArray(keysOrKey) ? keysOrKey : [keysOrKey];
+    return chrome.storage.sync.get(keys);
+  }
+
   // src/CacheManager.ts
   var CacheManager = class {
     /**
@@ -12706,7 +12719,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     async clear() {
       this.memoryCache.clear();
       this.persistentCacheSize = 0;
-      await chrome.storage.local.set({ tweetToxicityCache: {} });
+      await setLocalStorage({ tweetToxicityCache: {} });
     }
     /**
      * Returns the current size of the persistent cache in bytes
@@ -12725,7 +12738,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
      * Validates the structure and updates internal size tracking
      */
     async loadPersistentCache() {
-      const result = await chrome.storage.local.get(["tweetToxicityCache"]);
+      const result = await getLocalStorage("tweetToxicityCache");
       const cache = result.tweetToxicityCache || {};
       const parseResult = PersistentCacheSchema.safeParse(cache);
       if (!parseResult.success) {
@@ -12742,7 +12755,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       const serialized = JSON.stringify(cache);
       this.persistentCacheSize = serialized.length;
       try {
-        await chrome.storage.local.set({ tweetToxicityCache: cache });
+        await setLocalStorage({ tweetToxicityCache: cache });
       } catch (error46) {
         throw new CacheError(
           `Failed to save cache to storage: ${error46 instanceof Error ? error46.message : String(error46)}`
@@ -12812,7 +12825,7 @@ Here is the tweet:
 `
   };
   async function getSystemPrompt() {
-    const result = await chrome.storage.sync.get(["tweetPrefix"]);
+    const result = await getSyncStorage("tweetPrefix");
     const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
     if (typeof tweetPrefix !== "string") {
       console.warn("Invalid tweetPrefix in storage, using default");

@@ -1,4 +1,5 @@
 import { getSystemPrompt, saveSettings } from './lib';
+import { setLocalStorage } from './storage';
 
 /**
  * Options page script for the Tweet Moderator extension
@@ -63,4 +64,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       );
     }
   });
+
+  // Handle cache clearing
+  const clearCacheBtn = document.getElementById('clear-cache-btn');
+  const cacheStatus = document.getElementById('cache-status');
+
+  if (clearCacheBtn && cacheStatus) {
+    clearCacheBtn.addEventListener('click', async () => {
+      try {
+        // Clear the persistent cache in chrome.storage
+        // Type-safe: will get a TypeScript error if we use the wrong key
+        await setLocalStorage({ tweetToxicityCache: {} });
+
+        cacheStatus.textContent = 'Cache cleared successfully! Reload Twitter/X to see changes.';
+        cacheStatus.style.color = 'green';
+
+        setTimeout(() => {
+          cacheStatus.textContent = '';
+        }, 5000);
+      } catch (error) {
+        console.error('Error clearing cache:', error);
+        cacheStatus.textContent = `Failed to clear cache: ${error instanceof Error ? error.message : String(error)}`;
+        cacheStatus.style.color = 'red';
+      }
+    });
+  }
 });

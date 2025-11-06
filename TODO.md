@@ -1,6 +1,9 @@
-- Remove OpenAI support.
+## Completed ✅
 
-- Use system prompts, instead of smushing the effectively-a-system-prompt and a tweet into a single message.
+- ~~Remove OpenAI support~~ - Done! Codebase now uses only Anthropic/Claude
+- ~~Use system prompts~~ - Done! Now using proper Messages API with system prompts instead of concatenation
+
+## In Progress / TODO
 
 - Overhaul the classifier's prompting system. If a bad tweet gets through, make it easy for the user to (a) point it out to the extension, (b) see the extension's reasoning for why it thought it was okay, and (c) explain their own reasoning for why it's actually bad. When a new tweet is under moderation, the AI should see many/all of the historical examples of "tweet that made it through / explanation for why it's bad."
 

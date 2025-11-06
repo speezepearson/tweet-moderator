@@ -1,4 +1,5 @@
 import { CacheError, PersistentCache, PersistentCacheSchema, TweetHash } from './types';
+import { getLocalStorage, setLocalStorage } from './storage';
 
 /**
  * Manages two-level caching for tweet toxicity results:
@@ -77,7 +78,7 @@ export class CacheManager {
   async clear(): Promise<void> {
     this.memoryCache.clear();
     this.persistentCacheSize = 0;
-    await chrome.storage.local.set({ tweetToxicityCache: {} });
+    await setLocalStorage({ tweetToxicityCache: {} });
   }
 
   /**
@@ -99,7 +100,7 @@ export class CacheManager {
    * Validates the structure and updates internal size tracking
    */
   private async loadPersistentCache(): Promise<PersistentCache> {
-    const result = await chrome.storage.local.get(['tweetToxicityCache']);
+    const result = await getLocalStorage('tweetToxicityCache');
     const cache = result.tweetToxicityCache || {};
 
     // Validate cache structure
@@ -123,7 +124,7 @@ export class CacheManager {
     this.persistentCacheSize = serialized.length;
 
     try {
-      await chrome.storage.local.set({ tweetToxicityCache: cache });
+      await setLocalStorage({ tweetToxicityCache: cache });
     } catch (error) {
       throw new CacheError(
         `Failed to save cache to storage: ${error instanceof Error ? error.message : String(error)}`

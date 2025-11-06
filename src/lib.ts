@@ -1,4 +1,5 @@
 import { Keywords, Settings, SettingsSchema } from './types';
+import { getSyncStorage, setSyncStorage } from './storage';
 
 /**
  * Classification keywords used to parse OpenAI responses
@@ -45,7 +46,7 @@ Here is the tweet:
  * Falls back to default settings if not configured
  */
 export async function getSystemPrompt(): Promise<string> {
-  const result = await chrome.storage.sync.get(['tweetPrefix']);
+  const result = await getSyncStorage('tweetPrefix');
   const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
 
   // Validate that it's a string
@@ -69,7 +70,7 @@ export async function getTweetPrefix(): Promise<string> {
  * Returns undefined if not set
  */
 export async function getAnthropicApiKey(): Promise<string | undefined> {
-  const result = await chrome.storage.sync.get(['anthropicApiKey']);
+  const result = await getSyncStorage('anthropicApiKey');
   const apiKey = result.anthropicApiKey;
 
   if (apiKey && typeof apiKey !== 'string') {
@@ -88,11 +89,11 @@ export async function saveSettings(settings: Partial<Settings>): Promise<void> {
   const validatedSettings = SettingsSchema.partial().parse(settings);
 
   if (validatedSettings.tweetPrefix !== undefined) {
-    await chrome.storage.sync.set({ tweetPrefix: validatedSettings.tweetPrefix });
+    await setSyncStorage({ tweetPrefix: validatedSettings.tweetPrefix });
   }
 
   if (validatedSettings.anthropicApiKey !== undefined) {
-    await chrome.storage.sync.set({
+    await setSyncStorage({
       anthropicApiKey: validatedSettings.anthropicApiKey,
     });
   }

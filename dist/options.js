@@ -12602,6 +12602,18 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     })
   );
 
+  // src/storage.ts
+  async function setLocalStorage(items) {
+    return chrome.storage.local.set(items);
+  }
+  async function getSyncStorage(keysOrKey) {
+    const keys = Array.isArray(keysOrKey) ? keysOrKey : [keysOrKey];
+    return chrome.storage.sync.get(keys);
+  }
+  async function setSyncStorage(items) {
+    return chrome.storage.sync.set(items);
+  }
+
   // src/lib.ts
   var keywords = {
     good: "DOES NOT DO THE ABOVE",
@@ -12631,7 +12643,7 @@ Here is the tweet:
 `
   };
   async function getSystemPrompt() {
-    const result = await chrome.storage.sync.get(["tweetPrefix"]);
+    const result = await getSyncStorage("tweetPrefix");
     const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
     if (typeof tweetPrefix !== "string") {
       console.warn("Invalid tweetPrefix in storage, using default");
@@ -12642,10 +12654,10 @@ Here is the tweet:
   async function saveSettings(settings) {
     const validatedSettings = SettingsSchema.partial().parse(settings);
     if (validatedSettings.tweetPrefix !== void 0) {
-      await chrome.storage.sync.set({ tweetPrefix: validatedSettings.tweetPrefix });
+      await setSyncStorage({ tweetPrefix: validatedSettings.tweetPrefix });
     }
     if (validatedSettings.anthropicApiKey !== void 0) {
-      await chrome.storage.sync.set({
+      await setSyncStorage({
         anthropicApiKey: validatedSettings.anthropicApiKey
       });
     }
@@ -12692,6 +12704,24 @@ Here is the tweet:
         );
       }
     });
+    const clearCacheBtn = document.getElementById("clear-cache-btn");
+    const cacheStatus = document.getElementById("cache-status");
+    if (clearCacheBtn && cacheStatus) {
+      clearCacheBtn.addEventListener("click", async () => {
+        try {
+          await setLocalStorage({ tweetToxicityCache: {} });
+          cacheStatus.textContent = "Cache cleared successfully! Reload Twitter/X to see changes.";
+          cacheStatus.style.color = "green";
+          setTimeout(() => {
+            cacheStatus.textContent = "";
+          }, 5e3);
+        } catch (error46) {
+          console.error("Error clearing cache:", error46);
+          cacheStatus.textContent = `Failed to clear cache: ${error46 instanceof Error ? error46.message : String(error46)}`;
+          cacheStatus.style.color = "red";
+        }
+      });
+    }
   });
 })();
 //# sourceMappingURL=options.js.map

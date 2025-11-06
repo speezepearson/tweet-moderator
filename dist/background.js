@@ -12698,6 +12698,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
   };
 
+  // src/storage.ts
+  async function getSyncStorage(keysOrKey) {
+    const keys = Array.isArray(keysOrKey) ? keysOrKey : [keysOrKey];
+    return chrome.storage.sync.get(keys);
+  }
+
   // src/lib.ts
   var keywords = {
     good: "DOES NOT DO THE ABOVE",
@@ -12727,7 +12733,7 @@ Here is the tweet:
 `
   };
   async function getAnthropicApiKey() {
-    const result = await chrome.storage.sync.get(["anthropicApiKey"]);
+    const result = await getSyncStorage("anthropicApiKey");
     const apiKey = result.anthropicApiKey;
     if (apiKey && typeof apiKey !== "string") {
       console.warn("Invalid anthropicApiKey in storage");
