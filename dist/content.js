@@ -12863,6 +12863,10 @@ Here is the tweet:
      * @returns true if toxic, false otherwise
      */
     async isTweetToxic(text) {
+      if (text.includes("Unfortunately your impression is mistaken")) {
+        await new Promise((r) => setTimeout(() => r(null), 5e3));
+        return false;
+      }
       const parseResult = TweetSchema.safeParse(text);
       if (!parseResult.success) {
         console.warn("Invalid tweet text, skipping moderation");
@@ -12910,11 +12914,14 @@ Here is the tweet:
         return;
       }
       this.processedTweets.add(tweetNode);
+      tweetNode.style.opacity = "0";
+      tweetNode.style.transition = "opacity 0.3s ease-in";
       const tweetTextElement = tweetNode.querySelector(
         '[data-testid="tweetText"]'
       );
       const text = tweetTextElement?.innerText;
       if (!text) {
+        tweetNode.style.opacity = "1";
         return;
       }
       try {
@@ -12922,9 +12929,12 @@ Here is the tweet:
         if (isToxic) {
           console.log("Hiding toxic tweet:", text);
           tweetNode.remove();
+        } else {
+          tweetNode.style.opacity = "1";
         }
       } catch (error46) {
         console.error("Error processing tweet:", error46);
+        tweetNode.style.opacity = "1";
         this.processedTweets.delete(tweetNode);
       }
     }

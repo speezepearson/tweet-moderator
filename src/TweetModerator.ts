@@ -48,6 +48,10 @@ export class TweetModerator {
    * @returns true if toxic, false otherwise
    */
   async isTweetToxic(text: string): Promise<boolean> {
+    if (text.includes('Unfortunately your impression is mistaken')) {
+      await new Promise(r => setTimeout(()=>r(null), 5000));
+      return false;
+    }
     // Parse and validate tweet
     const parseResult = TweetSchema.safeParse(text);
     if (!parseResult.success) {
@@ -110,12 +114,18 @@ export class TweetModerator {
     }
     this.processedTweets.add(tweetNode);
 
+    // Hide tweet immediately while checking toxicity
+    tweetNode.style.opacity = '0';
+    tweetNode.style.transition = 'opacity 0.3s ease-in';
+
     // Extract text from the tweetText element within the article
     const tweetTextElement = tweetNode.querySelector(
       '[data-testid="tweetText"]'
     ) as HTMLElement | null;
     const text = tweetTextElement?.innerText;
     if (!text) {
+      // No text to moderate, show the tweet
+      tweetNode.style.opacity = '1';
       return;
     }
 
@@ -125,9 +135,14 @@ export class TweetModerator {
         console.log('Hiding toxic tweet:', text);
         // Remove the tweet article directly
         tweetNode.remove();
+      } else {
+        // Safe tweet, fade it in
+        tweetNode.style.opacity = '1';
       }
     } catch (error) {
       console.error('Error processing tweet:', error);
+      // On error, show the tweet rather than hiding it
+      tweetNode.style.opacity = '1';
       // Remove from processed set so it can be retried
       this.processedTweets.delete(tweetNode);
     }

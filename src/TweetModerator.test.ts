@@ -165,6 +165,7 @@ describe('TweetModerator', () => {
       const mockTweetNode = {
         querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
         remove: vi.fn(),
+        style: {},
       } as any;
 
       (mockCacheManager.get as any).mockResolvedValue(undefined);
@@ -174,15 +175,17 @@ describe('TweetModerator', () => {
 
       expect(mockTweetNode.querySelector).toHaveBeenCalledWith('[data-testid="tweetText"]');
       expect(mockTweetNode.remove).toHaveBeenCalled();
+      expect(mockTweetNode.style.opacity).toBe('0');
     });
 
-    it('should not hide non-toxic tweet', async () => {
+    it('should fade in non-toxic tweet', async () => {
       const mockTweetTextElement = {
         innerText: 'Nice tweet content',
       };
       const mockTweetNode = {
         querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
         remove: vi.fn(),
+        style: {},
       } as any;
 
       (mockCacheManager.get as any).mockResolvedValue(undefined);
@@ -191,6 +194,40 @@ describe('TweetModerator', () => {
       await moderator.processTweet(mockTweetNode);
 
       expect(mockTweetNode.remove).not.toHaveBeenCalled();
+      expect(mockTweetNode.style.opacity).toBe('1');
+      expect(mockTweetNode.style.transition).toBe('opacity 0.3s ease-in');
+    });
+
+    it('should set tweet opacity to 0 while checking toxicity', async () => {
+      const mockTweetTextElement = {
+        innerText: 'Test tweet',
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        remove: vi.fn(),
+        style: {},
+      } as any;
+
+      // Mock a slow API call to verify opacity is set immediately
+      let resolveChat: any;
+      const chatPromise = new Promise((resolve) => {
+        resolveChat = resolve;
+      });
+      (mockCacheManager.get as any).mockResolvedValue(undefined);
+      (mockAIClient.chat as any).mockReturnValue(chatPromise);
+
+      const processingPromise = moderator.processTweet(mockTweetNode);
+
+      // Opacity should be set to 0 immediately
+      expect(mockTweetNode.style.opacity).toBe('0');
+      expect(mockTweetNode.style.transition).toBe('opacity 0.3s ease-in');
+
+      // Complete the API call
+      resolveChat(`Not toxic ${keywords.good}`);
+      await processingPromise;
+
+      // After processing, opacity should be 1
+      expect(mockTweetNode.style.opacity).toBe('1');
     });
 
     it('should not process same tweet twice', async () => {
@@ -199,6 +236,7 @@ describe('TweetModerator', () => {
       };
       const mockTweetNode = {
         querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        style: {},
       } as any;
 
       await moderator.processTweet(mockTweetNode);
@@ -208,16 +246,36 @@ describe('TweetModerator', () => {
       expect(mockCacheManager.get).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle empty tweet text gracefully', async () => {
+    it('should show tweet with opacity 1 when no text element found', async () => {
       const mockTweetNode = {
         querySelector: vi.fn().mockReturnValue(null),
         remove: vi.fn(),
+        style: {},
       } as any;
 
       await moderator.processTweet(mockTweetNode);
 
-      // Should not call remove on empty tweet
       expect(mockTweetNode.remove).not.toHaveBeenCalled();
+      expect(mockTweetNode.style.opacity).toBe('1');
+    });
+
+    it('should show tweet with opacity 1 on error', async () => {
+      const mockTweetTextElement = {
+        innerText: 'Test tweet',
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        remove: vi.fn(),
+        style: {},
+      } as any;
+
+      (mockCacheManager.get as any).mockResolvedValue(undefined);
+      (mockAIClient.chat as any).mockRejectedValue(new Error('API Error'));
+
+      await moderator.processTweet(mockTweetNode);
+
+      expect(mockTweetNode.remove).not.toHaveBeenCalled();
+      expect(mockTweetNode.style.opacity).toBe('1');
     });
   });
 
@@ -228,6 +286,7 @@ describe('TweetModerator', () => {
       };
       const mockTweetNode = {
         querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        style: {},
       } as any;
 
       await moderator.processTweet(mockTweetNode);

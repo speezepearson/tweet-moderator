@@ -2,14 +2,13 @@
 
 - ~~Remove OpenAI support~~ - Done! Codebase now uses only Anthropic/Claude
 - ~~Use system prompts~~ - Done! Now using proper Messages API with system prompts instead of concatenation
+- ~~Make all tweets opacity:0 until they've been cleared by the moderator~~ - Done! Tweets now start at opacity 0 and fade in smoothly once cleared
 
 ## In Progress / TODO
 
 - Overhaul the classifier's prompting system. If a bad tweet gets through, make it easy for the user to (a) point it out to the extension, (b) see the extension's reasoning for why it thought it was okay, and (c) explain their own reasoning for why it's actually bad. When a new tweet is under moderation, the AI should see many/all of the historical examples of "tweet that made it through / explanation for why it's bad."
 
 - Converse to the above: have a mode where the user can see the bad tweets (maybe outline them in red instead of hiding them), and explain why any of them is actually okay.
-
-- Make all tweets opacity:0 until they've been cleared by the moderator.
 
 - If a tweet contains images, include those images in the moderator AI query.
 
