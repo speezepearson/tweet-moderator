@@ -1,6 +1,5 @@
-import { DEFAULT_MODELS } from './AIClient';
+import { DEFAULT_MODEL } from './AIClient';
 import { BackgroundAIClient } from './BackgroundAIClient';
-import { getAIBackend } from './lib';
 import { TweetModerator } from './TweetModerator';
 
 /**
@@ -16,15 +15,12 @@ let observer: MutationObserver | null = null;
  * Creates a BackgroundAIClient that proxies requests to the background script
  */
 async function initialize(): Promise<void> {
-  const backend = await getAIBackend();
-  const model = DEFAULT_MODELS[backend];
-
   // Use BackgroundAIClient to avoid CORS issues
   // The background script will handle the actual API calls
-  const aiClient = new BackgroundAIClient(model);
+  const aiClient = new BackgroundAIClient(DEFAULT_MODEL);
 
   try {
-    moderator = new TweetModerator(aiClient, model);
+    moderator = new TweetModerator(aiClient, DEFAULT_MODEL);
 
     // Process tweets that are already on the page
     await moderator.processAllTweets();
@@ -32,7 +28,7 @@ async function initialize(): Promise<void> {
     // Set up observer for new tweets
     startObserver();
 
-    console.log(`Tweet Moderator: Initialized successfully with ${backend} backend`);
+    console.log('Tweet Moderator: Initialized successfully with Anthropic backend');
   } catch (error) {
     console.error('Tweet Moderator: Failed to initialize:', error);
   }
@@ -116,10 +112,7 @@ window.addEventListener('unload', cleanup);
 
 // Listen for storage changes to reinitialize if settings change
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (
-    areaName === 'sync' &&
-    (changes.openaiApiKey || changes.anthropicApiKey || changes.aiBackend)
-  ) {
+  if (areaName === 'sync' && changes.anthropicApiKey) {
     console.log('Tweet Moderator: Settings changed, reinitializing...');
     cleanup();
     initialize().catch((error) => {

@@ -1,6 +1,5 @@
 /**
  * Abstract interface for AI API clients
- * Allows switching between different AI providers (OpenAI, Anthropic, etc.)
  */
 export interface AIClient {
   /**
@@ -8,20 +7,13 @@ export interface AIClient {
    *
    * @param message - The user message to send
    * @param model - Optional model override
+   * @param systemPrompt - Optional system prompt to guide the model's behavior
    * @returns The AI's response text
    */
-  chat(message: string, model?: string): Promise<string>;
+  chat(message: string, model?: string, systemPrompt?: string): Promise<string>;
 }
 
 /**
- * Supported AI backend providers
+ * Default Anthropic model
  */
-export type AIBackend = 'openai' | 'anthropic';
-
-/**
- * Default models for each backend
- */
-export const DEFAULT_MODELS: Record<AIBackend, string> = {
-  openai: 'gpt-4o',
-  anthropic: 'claude-sonnet-4-5-20250929',
-};
+export const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';

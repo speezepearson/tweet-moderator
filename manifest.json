@@ -8,7 +8,6 @@
       "storage"
     ],
     "host_permissions": [
-      "https://api.openai.com/*",
       "https://api.anthropic.com/*"
     ],
     "options_page": "dist/options.html",

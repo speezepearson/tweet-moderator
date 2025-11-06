@@ -7,23 +7,21 @@
   };
 
   // src/AIClient.ts
-  var DEFAULT_MODELS = {
-    openai: "gpt-4o",
-    anthropic: "claude-sonnet-4-5-20250929"
-  };
+  var DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 
   // src/BackgroundAIClient.ts
   var BackgroundAIClient = class {
     constructor(model) {
       this.model = model;
     }
-    async chat(message, model) {
+    async chat(message, model, systemPrompt) {
       return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(
           {
             type: "CHECK_TWEET",
             message,
-            model: model || this.model
+            model: model || this.model,
+            systemPrompt
           },
           (response) => {
             if (chrome.runtime.lastError) {
@@ -12597,40 +12595,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   });
   var SettingsSchema = external_exports.object({
     tweetPrefix: external_exports.string().min(1),
-    openaiApiKey: external_exports.string().optional(),
-    anthropicApiKey: external_exports.string().optional(),
-    aiBackend: external_exports.enum(["openai", "anthropic"]).optional()
-  });
-  var OpenAIMessageSchema = external_exports.object({
-    role: external_exports.enum(["system", "user", "assistant"]),
-    content: external_exports.string()
-  });
-  var OpenAIRequestSchema = external_exports.object({
-    model: external_exports.string(),
-    messages: external_exports.array(OpenAIMessageSchema),
-    temperature: external_exports.number().optional(),
-    max_tokens: external_exports.number().optional()
-  });
-  var OpenAIResponseSchema = external_exports.object({
-    id: external_exports.string(),
-    object: external_exports.string(),
-    created: external_exports.number(),
-    model: external_exports.string(),
-    choices: external_exports.array(
-      external_exports.object({
-        index: external_exports.number(),
-        message: external_exports.object({
-          role: external_exports.string(),
-          content: external_exports.string()
-        }),
-        finish_reason: external_exports.string()
-      })
-    ).min(1, "Response must contain at least one choice"),
-    usage: external_exports.object({
-      prompt_tokens: external_exports.number(),
-      completion_tokens: external_exports.number(),
-      total_tokens: external_exports.number()
-    }).optional()
+    anthropicApiKey: external_exports.string().optional()
   });
   var AnthropicMessageSchema = external_exports.object({
     role: external_exports.enum(["user", "assistant"]),
@@ -12640,6 +12605,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     model: external_exports.string(),
     messages: external_exports.array(AnthropicMessageSchema),
     max_tokens: external_exports.number(),
+    system: external_exports.string().optional(),
     temperature: external_exports.number().optional()
   });
   var AnthropicResponseSchema = external_exports.object({
@@ -12672,14 +12638,6 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       timestamp: external_exports.number()
     })
   );
-  var OpenAIError = class extends Error {
-    constructor(message, statusCode, response) {
-      super(message);
-      this.statusCode = statusCode;
-      this.response = response;
-      this.name = "OpenAIError";
-    }
-  };
   var AnthropicError = class extends Error {
     constructor(message, statusCode, response) {
       super(message);
@@ -12694,52 +12652,6 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       this.name = "CacheError";
     }
   };
-
-  // src/lib.ts
-  var keywords = {
-    good: "DOES NOT DO THE ABOVE",
-    bad: "DOES THE ABOVE"
-  };
-  var maxKeywordLength = Math.max(
-    ...Object.values(keywords).map((v) => v.length)
-  );
-  var defaultSettings = {
-    tweetPrefix: `
-You are Tweet Moderator.
-You evaluate tweets for inflammatory content.
-I'm going to give you a tweet. Please check whether it does any of the following:
-- seems likely to provoke anger / outrage / indignation
-- employs sarcasm
-- takes sides on a political issue
-- accuses others of morally objectionable beliefs
-- is written in an angry tone that discourages disagreement
-
-(Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
-There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
-Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
-
-
-Here is the tweet:
-
-`
-  };
-  async function getTweetPrefix() {
-    const result = await chrome.storage.sync.get(["tweetPrefix"]);
-    const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
-    if (typeof tweetPrefix !== "string") {
-      console.warn("Invalid tweetPrefix in storage, using default");
-      return defaultSettings.tweetPrefix;
-    }
-    return tweetPrefix;
-  }
-  async function getAIBackend() {
-    const result = await chrome.storage.sync.get(["aiBackend"]);
-    const backend = result.aiBackend;
-    if (backend === "openai" || backend === "anthropic") {
-      return backend;
-    }
-    return "openai";
-  }
 
   // src/CacheManager.ts
   var CacheManager = class {
@@ -12871,6 +12783,44 @@ Here is the tweet:
     return globalCacheManager;
   }
 
+  // src/lib.ts
+  var keywords = {
+    good: "DOES NOT DO THE ABOVE",
+    bad: "DOES THE ABOVE"
+  };
+  var maxKeywordLength = Math.max(
+    ...Object.values(keywords).map((v) => v.length)
+  );
+  var defaultSettings = {
+    tweetPrefix: `
+You are Tweet Moderator.
+You evaluate tweets for inflammatory content.
+I'm going to give you a tweet. Please check whether it does any of the following:
+- seems likely to provoke anger / outrage / indignation
+- employs sarcasm
+- takes sides on a political issue
+- accuses others of morally objectionable beliefs
+- is written in an angry tone that discourages disagreement
+
+(Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
+There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
+Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
+
+
+Here is the tweet:
+
+`
+  };
+  async function getSystemPrompt() {
+    const result = await chrome.storage.sync.get(["tweetPrefix"]);
+    const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
+    if (typeof tweetPrefix !== "string") {
+      console.warn("Invalid tweetPrefix in storage, using default");
+      return defaultSettings.tweetPrefix;
+    }
+    return tweetPrefix;
+  }
+
   // src/TweetModerator.ts
   var TweetModerator = class _TweetModerator {
     constructor(aiClient, model, cacheManager) {
@@ -12913,8 +12863,8 @@ Here is the tweet:
       }
       try {
         console.log("Checking tweet:", text);
-        const prefix = await getTweetPrefix();
-        const responseText = await this.aiClient.chat(prefix + text, this.model);
+        const systemPrompt = await getSystemPrompt();
+        const responseText = await this.aiClient.chat(text, this.model, systemPrompt);
         const lastChars = responseText.slice(-(maxKeywordLength + 5));
         const hasGood = lastChars.includes(keywords.good);
         const hasBad = lastChars.includes(keywords.bad);
@@ -12929,8 +12879,8 @@ Here is the tweet:
         });
         return isToxic;
       } catch (error46) {
-        if (error46 instanceof OpenAIError || error46 instanceof AnthropicError) {
-          console.error("AI API error:", error46.message, error46.statusCode);
+        if (error46 instanceof AnthropicError) {
+          console.error("Anthropic API error:", error46.message, error46.statusCode);
           return false;
         }
         console.error("Error moderating tweet:", error46);
@@ -13001,14 +12951,12 @@ Here is the tweet:
   var moderator = null;
   var observer = null;
   async function initialize() {
-    const backend = await getAIBackend();
-    const model = DEFAULT_MODELS[backend];
-    const aiClient = new BackgroundAIClient(model);
+    const aiClient = new BackgroundAIClient(DEFAULT_MODEL);
     try {
-      moderator = new TweetModerator(aiClient, model);
+      moderator = new TweetModerator(aiClient, DEFAULT_MODEL);
       await moderator.processAllTweets();
       startObserver();
-      console.log(`Tweet Moderator: Initialized successfully with ${backend} backend`);
+      console.log("Tweet Moderator: Initialized successfully with Anthropic backend");
     } catch (error46) {
       console.error("Tweet Moderator: Failed to initialize:", error46);
     }
@@ -13061,7 +13009,7 @@ Here is the tweet:
   });
   window.addEventListener("unload", cleanup);
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "sync" && (changes.openaiApiKey || changes.anthropicApiKey || changes.aiBackend)) {
+    if (areaName === "sync" && changes.anthropicApiKey) {
       console.log("Tweet Moderator: Settings changed, reinitializing...");
       cleanup();
       initialize().catch((error46) => {

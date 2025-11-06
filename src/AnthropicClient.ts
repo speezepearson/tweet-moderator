@@ -80,13 +80,19 @@ export class AnthropicClient implements AIClient {
    *
    * @param message - The user message to send
    * @param model - The model to use (defaults to claude-sonnet-4-5-20250929)
+   * @param systemPrompt - Optional system prompt to guide the model's behavior
    * @returns The assistant's response text
    */
-  async chat(message: string, model = 'claude-sonnet-4-5-20250929'): Promise<string> {
+  async chat(
+    message: string,
+    model = 'claude-sonnet-4-5-20250929',
+    systemPrompt?: string
+  ): Promise<string> {
     const response = await this.createMessage({
       model,
       max_tokens: 1024,
       messages: [{ role: 'user', content: message }],
+      ...(systemPrompt ? { system: systemPrompt } : {}),
     });
 
     const content = response.content[0]?.text;

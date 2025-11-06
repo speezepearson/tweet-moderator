@@ -7,13 +7,14 @@ import { AIClient } from './AIClient';
 export class BackgroundAIClient implements AIClient {
   constructor(private readonly model: string) {}
 
-  async chat(message: string, model?: string): Promise<string> {
+  async chat(message: string, model?: string, systemPrompt?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
           type: 'CHECK_TWEET',
           message,
           model: model || this.model,
+          systemPrompt,
         },
         (response) => {
           if (chrome.runtime.lastError) {

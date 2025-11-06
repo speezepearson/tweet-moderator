@@ -7,10 +7,7 @@
   };
 
   // src/AIClient.ts
-  var DEFAULT_MODELS = {
-    openai: "gpt-4o",
-    anthropic: "claude-sonnet-4-5-20250929"
-  };
+  var DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 
   // node_modules/zod/v4/classic/external.js
   var external_exports = {};
@@ -12564,40 +12561,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   });
   var SettingsSchema = external_exports.object({
     tweetPrefix: external_exports.string().min(1),
-    openaiApiKey: external_exports.string().optional(),
-    anthropicApiKey: external_exports.string().optional(),
-    aiBackend: external_exports.enum(["openai", "anthropic"]).optional()
-  });
-  var OpenAIMessageSchema = external_exports.object({
-    role: external_exports.enum(["system", "user", "assistant"]),
-    content: external_exports.string()
-  });
-  var OpenAIRequestSchema = external_exports.object({
-    model: external_exports.string(),
-    messages: external_exports.array(OpenAIMessageSchema),
-    temperature: external_exports.number().optional(),
-    max_tokens: external_exports.number().optional()
-  });
-  var OpenAIResponseSchema = external_exports.object({
-    id: external_exports.string(),
-    object: external_exports.string(),
-    created: external_exports.number(),
-    model: external_exports.string(),
-    choices: external_exports.array(
-      external_exports.object({
-        index: external_exports.number(),
-        message: external_exports.object({
-          role: external_exports.string(),
-          content: external_exports.string()
-        }),
-        finish_reason: external_exports.string()
-      })
-    ).min(1, "Response must contain at least one choice"),
-    usage: external_exports.object({
-      prompt_tokens: external_exports.number(),
-      completion_tokens: external_exports.number(),
-      total_tokens: external_exports.number()
-    }).optional()
+    anthropicApiKey: external_exports.string().optional()
   });
   var AnthropicMessageSchema = external_exports.object({
     role: external_exports.enum(["user", "assistant"]),
@@ -12607,6 +12571,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     model: external_exports.string(),
     messages: external_exports.array(AnthropicMessageSchema),
     max_tokens: external_exports.number(),
+    system: external_exports.string().optional(),
     temperature: external_exports.number().optional()
   });
   var AnthropicResponseSchema = external_exports.object({
@@ -12639,14 +12604,6 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       timestamp: external_exports.number()
     })
   );
-  var OpenAIError = class extends Error {
-    constructor(message, statusCode, response) {
-      super(message);
-      this.statusCode = statusCode;
-      this.response = response;
-      this.name = "OpenAIError";
-    }
-  };
   var AnthropicError = class extends Error {
     constructor(message, statusCode, response) {
       super(message);
@@ -12723,13 +12680,15 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
      *
      * @param message - The user message to send
      * @param model - The model to use (defaults to claude-sonnet-4-5-20250929)
+     * @param systemPrompt - Optional system prompt to guide the model's behavior
      * @returns The assistant's response text
      */
-    async chat(message, model = "claude-sonnet-4-5-20250929") {
+    async chat(message, model = "claude-sonnet-4-5-20250929", systemPrompt) {
       const response = await this.createMessage({
         model,
         max_tokens: 1024,
-        messages: [{ role: "user", content: message }]
+        messages: [{ role: "user", content: message }],
+        ...systemPrompt ? { system: systemPrompt } : {}
       });
       const content = response.content[0]?.text;
       if (!content) {
@@ -12767,15 +12726,6 @@ Here is the tweet:
 
 `
   };
-  async function getOpenaiApiKey() {
-    const result = await chrome.storage.sync.get(["openaiApiKey"]);
-    const apiKey = result.openaiApiKey;
-    if (apiKey && typeof apiKey !== "string") {
-      console.warn("Invalid openaiApiKey in storage");
-      return void 0;
-    }
-    return apiKey;
-  }
   async function getAnthropicApiKey() {
     const result = await chrome.storage.sync.get(["anthropicApiKey"]);
     const apiKey = result.anthropicApiKey;
@@ -12785,93 +12735,6 @@ Here is the tweet:
     }
     return apiKey;
   }
-  async function getAIBackend() {
-    const result = await chrome.storage.sync.get(["aiBackend"]);
-    const backend = result.aiBackend;
-    if (backend === "openai" || backend === "anthropic") {
-      return backend;
-    }
-    return "openai";
-  }
-
-  // src/OpenAIClient.ts
-  var OpenAIClient = class {
-    constructor(apiKey) {
-      this.baseUrl = "https://api.openai.com/v1";
-      this.apiKey = apiKey;
-    }
-    /**
-     * Makes a chat completion request to OpenAI API
-     * Validates the response and provides detailed error handling
-     *
-     * @param request - The OpenAI request parameters
-     * @returns Validated OpenAI response
-     * @throws {OpenAIError} If the API request fails
-     * @throws {ValidationError} If the response format is invalid
-     */
-    async chatCompletion(request) {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify(request)
-      });
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown error");
-        throw new OpenAIError(
-          `OpenAI API request failed: ${response.statusText}`,
-          response.status,
-          errorText
-        );
-      }
-      let responseData;
-      try {
-        responseData = await response.json();
-      } catch (error46) {
-        throw new OpenAIError("Failed to parse OpenAI API response as JSON", response.status);
-      }
-      const parseResult = OpenAIResponseSchema.safeParse(responseData);
-      if (!parseResult.success) {
-        throw new ValidationError(
-          "OpenAI API response does not match expected schema",
-          parseResult.error
-        );
-      }
-      return parseResult.data;
-    }
-    /**
-     * Sends a chat message and returns the response text
-     * Implements the AIClient interface
-     *
-     * @param message - The user message to send
-     * @param model - The model to use (defaults to gpt-4o)
-     * @returns The assistant's response text
-     */
-    async chat(message, model = "gpt-4o") {
-      const response = await this.chatCompletion({
-        model,
-        messages: [{ role: "user", content: message }]
-      });
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new OpenAIError("OpenAI response missing content");
-      }
-      return content;
-    }
-    /**
-     * @deprecated Use chat() instead
-     * Helper method to create a simple chat completion with a single user message
-     *
-     * @param message - The user message to send
-     * @param model - The model to use (defaults to gpt-4o)
-     * @returns The assistant's response text
-     */
-    async simpleChat(message, model = "gpt-4o") {
-      return this.chat(message, model);
-    }
-  };
 
   // src/background.ts
   chrome.runtime.onInstalled.addListener(() => {
@@ -12887,7 +12750,7 @@ Here is the tweet:
   });
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.type === "CHECK_TWEET") {
-      handleCheckTweet(request.message, request.model).then((response) => sendResponse({ success: true, response })).catch(
+      handleCheckTweet(request.message, request.model, request.systemPrompt).then((response) => sendResponse({ success: true, response })).catch(
         (error46) => sendResponse({
           success: false,
           error: error46 instanceof Error ? error46.message : String(error46)
@@ -12897,25 +12760,13 @@ Here is the tweet:
     }
     return false;
   });
-  async function handleCheckTweet(message, model) {
-    const backend = await getAIBackend();
-    let aiClient;
-    if (backend === "openai") {
-      const apiKey = await getOpenaiApiKey();
-      if (!apiKey) {
-        throw new Error("No OpenAI API key found");
-      }
-      aiClient = new OpenAIClient(apiKey);
-    } else if (backend === "anthropic") {
-      const apiKey = await getAnthropicApiKey();
-      if (!apiKey) {
-        throw new Error("No Anthropic API key found");
-      }
-      aiClient = new AnthropicClient(apiKey);
-    } else {
-      throw new Error(`Unknown backend: ${backend}`);
+  async function handleCheckTweet(message, model, systemPrompt) {
+    const apiKey = await getAnthropicApiKey();
+    if (!apiKey) {
+      throw new Error("No Anthropic API key found");
     }
-    return aiClient.chat(message, model || DEFAULT_MODELS[backend]);
+    const aiClient = new AnthropicClient(apiKey);
+    return aiClient.chat(message, model || DEFAULT_MODEL, systemPrompt);
   }
 })();
 //# sourceMappingURL=background.js.map

@@ -4,12 +4,13 @@ import { AIClient } from './AIClient';
 import { CacheManager } from './CacheManager';
 import { keywords } from './lib';
 
-// Mock getTweetPrefix
+// Mock getSystemPrompt
 vi.mock('./lib', async () => {
   const actual = await vi.importActual('./lib');
   return {
     ...actual,
-    getTweetPrefix: vi.fn(async () => 'Test prefix: '),
+    getSystemPrompt: vi.fn(async () => 'Test system prompt'),
+    getTweetPrefix: vi.fn(async () => 'Test system prompt'), // Keep for backwards compat
   };
 });
 
@@ -136,7 +137,7 @@ describe('TweetModerator', () => {
       expect(mockAIClient.chat).not.toHaveBeenCalled();
     });
 
-    it('should call AIClient with correct model', async () => {
+    it('should call AIClient with correct model and system prompt', async () => {
       const tweetText = 'Test tweet';
       (mockAIClient.chat as any).mockResolvedValue(
         `Response ${keywords.good}`
@@ -145,8 +146,9 @@ describe('TweetModerator', () => {
       await moderator.isTweetToxic(tweetText);
 
       expect(mockAIClient.chat).toHaveBeenCalledWith(
-        expect.stringContaining(tweetText),
-        'test-model'
+        tweetText,
+        'test-model',
+        'Test system prompt'
       );
     });
   });

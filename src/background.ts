@@ -1,7 +1,6 @@
-import { AIClient, DEFAULT_MODELS } from './AIClient';
+import { DEFAULT_MODEL } from './AIClient';
 import { AnthropicClient } from './AnthropicClient';
-import { getAIBackend, getAnthropicApiKey, getOpenaiApiKey } from './lib';
-import { OpenAIClient } from './OpenAIClient';
+import { getAnthropicApiKey } from './lib';
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Tweet Moderator extension installed');
@@ -23,7 +22,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Handle messages from content script for AI API calls
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === 'CHECK_TWEET') {
-    handleCheckTweet(request.message, request.model)
+    handleCheckTweet(request.message, request.model, request.systemPrompt)
       .then((response) => sendResponse({ success: true, response }))
       .catch((error) =>
         sendResponse({
@@ -36,25 +35,16 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   return false; // Don't keep channel open for other message types
 });
 
-async function handleCheckTweet(message: string, model: string): Promise<string> {
-  const backend = await getAIBackend();
-  let aiClient: AIClient;
-
-  if (backend === 'openai') {
-    const apiKey = await getOpenaiApiKey();
-    if (!apiKey) {
-      throw new Error('No OpenAI API key found');
-    }
-    aiClient = new OpenAIClient(apiKey);
-  } else if (backend === 'anthropic') {
-    const apiKey = await getAnthropicApiKey();
-    if (!apiKey) {
-      throw new Error('No Anthropic API key found');
-    }
-    aiClient = new AnthropicClient(apiKey);
-  } else {
-    throw new Error(`Unknown backend: ${backend}`);
+async function handleCheckTweet(
+  message: string,
+  model: string,
+  systemPrompt?: string
+): Promise<string> {
+  const apiKey = await getAnthropicApiKey();
+  if (!apiKey) {
+    throw new Error('No Anthropic API key found');
   }
 
-  return aiClient.chat(message, model || DEFAULT_MODELS[backend]);
+  const aiClient = new AnthropicClient(apiKey);
+  return aiClient.chat(message, model || DEFAULT_MODEL, systemPrompt);
 }

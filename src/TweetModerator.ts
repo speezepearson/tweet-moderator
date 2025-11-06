@@ -1,9 +1,8 @@
 import { AIClient } from './AIClient';
 import { CacheManager, getCacheManager } from './CacheManager';
-import { getTweetPrefix, keywords, maxKeywordLength } from './lib';
+import { getSystemPrompt, keywords, maxKeywordLength } from './lib';
 import {
   AnthropicError,
-  OpenAIError,
   Tweet,
   TweetHash,
   TweetHashSchema,
@@ -67,8 +66,8 @@ export class TweetModerator {
     // Make API call
     try {
       console.log('Checking tweet:', text);
-      const prefix = await getTweetPrefix();
-      const responseText = await this.aiClient.chat(prefix + text, this.model);
+      const systemPrompt = await getSystemPrompt();
+      const responseText = await this.aiClient.chat(text, this.model, systemPrompt);
 
       // Parse classification from response
       const lastChars = responseText.slice(-(maxKeywordLength + 5));
@@ -89,8 +88,8 @@ export class TweetModerator {
 
       return isToxic;
     } catch (error) {
-      if (error instanceof OpenAIError || error instanceof AnthropicError) {
-        console.error('AI API error:', error.message, error.statusCode);
+      if (error instanceof AnthropicError) {
+        console.error('Anthropic API error:', error.message, error.statusCode);
         // Don't cache API errors, user might fix their API key
         return false;
       }

@@ -12558,40 +12558,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   });
   var SettingsSchema = external_exports.object({
     tweetPrefix: external_exports.string().min(1),
-    openaiApiKey: external_exports.string().optional(),
-    anthropicApiKey: external_exports.string().optional(),
-    aiBackend: external_exports.enum(["openai", "anthropic"]).optional()
-  });
-  var OpenAIMessageSchema = external_exports.object({
-    role: external_exports.enum(["system", "user", "assistant"]),
-    content: external_exports.string()
-  });
-  var OpenAIRequestSchema = external_exports.object({
-    model: external_exports.string(),
-    messages: external_exports.array(OpenAIMessageSchema),
-    temperature: external_exports.number().optional(),
-    max_tokens: external_exports.number().optional()
-  });
-  var OpenAIResponseSchema = external_exports.object({
-    id: external_exports.string(),
-    object: external_exports.string(),
-    created: external_exports.number(),
-    model: external_exports.string(),
-    choices: external_exports.array(
-      external_exports.object({
-        index: external_exports.number(),
-        message: external_exports.object({
-          role: external_exports.string(),
-          content: external_exports.string()
-        }),
-        finish_reason: external_exports.string()
-      })
-    ).min(1, "Response must contain at least one choice"),
-    usage: external_exports.object({
-      prompt_tokens: external_exports.number(),
-      completion_tokens: external_exports.number(),
-      total_tokens: external_exports.number()
-    }).optional()
+    anthropicApiKey: external_exports.string().optional()
   });
   var AnthropicMessageSchema = external_exports.object({
     role: external_exports.enum(["user", "assistant"]),
@@ -12601,6 +12568,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     model: external_exports.string(),
     messages: external_exports.array(AnthropicMessageSchema),
     max_tokens: external_exports.number(),
+    system: external_exports.string().optional(),
     temperature: external_exports.number().optional()
   });
   var AnthropicResponseSchema = external_exports.object({
@@ -12662,7 +12630,7 @@ Here is the tweet:
 
 `
   };
-  async function getTweetPrefix() {
+  async function getSystemPrompt() {
     const result = await chrome.storage.sync.get(["tweetPrefix"]);
     const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
     if (typeof tweetPrefix !== "string") {
@@ -12671,29 +12639,15 @@ Here is the tweet:
     }
     return tweetPrefix;
   }
-  async function getAIBackend() {
-    const result = await chrome.storage.sync.get(["aiBackend"]);
-    const backend = result.aiBackend;
-    if (backend === "openai" || backend === "anthropic") {
-      return backend;
-    }
-    return "openai";
-  }
   async function saveSettings(settings) {
     const validatedSettings = SettingsSchema.partial().parse(settings);
     if (validatedSettings.tweetPrefix !== void 0) {
       await chrome.storage.sync.set({ tweetPrefix: validatedSettings.tweetPrefix });
     }
-    if (validatedSettings.openaiApiKey !== void 0) {
-      await chrome.storage.sync.set({ openaiApiKey: validatedSettings.openaiApiKey });
-    }
     if (validatedSettings.anthropicApiKey !== void 0) {
       await chrome.storage.sync.set({
         anthropicApiKey: validatedSettings.anthropicApiKey
       });
-    }
-    if (validatedSettings.aiBackend !== void 0) {
-      await chrome.storage.sync.set({ aiBackend: validatedSettings.aiBackend });
     }
   }
 
@@ -12705,40 +12659,31 @@ Here is the tweet:
       return;
     }
     const tweetPrefixField = form.elements.namedItem("tweetPrefix");
-    const openaiApiKeyField = form.elements.namedItem("openaiApiKey");
     const anthropicApiKeyField = form.elements.namedItem("anthropicApiKey");
-    const aiBackendField = form.elements.namedItem("aiBackend");
-    if (!tweetPrefixField || !(tweetPrefixField instanceof HTMLTextAreaElement) || !openaiApiKeyField || !(openaiApiKeyField instanceof HTMLInputElement) || !anthropicApiKeyField || !(anthropicApiKeyField instanceof HTMLInputElement) || !aiBackendField || !(aiBackendField instanceof HTMLSelectElement)) {
+    if (!tweetPrefixField || !(tweetPrefixField instanceof HTMLTextAreaElement) || !anthropicApiKeyField || !(anthropicApiKeyField instanceof HTMLInputElement)) {
       console.error("Form fields not found or have incorrect types");
       return;
     }
     try {
-      const currentPrefix = await getTweetPrefix();
+      const currentPrefix = await getSystemPrompt();
       tweetPrefixField.value = currentPrefix;
-      const currentBackend = await getAIBackend();
-      aiBackendField.value = currentBackend;
     } catch (error46) {
       console.error("Error loading settings:", error46);
     }
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const tweetPrefix = tweetPrefixField.value.trim();
-      const openaiApiKey = openaiApiKeyField.value.trim();
       const anthropicApiKey = anthropicApiKeyField.value.trim();
-      const aiBackend = aiBackendField.value;
       if (!tweetPrefix) {
-        alert("Tweet prefix cannot be empty");
+        alert("System prompt cannot be empty");
         return;
       }
       try {
         await saveSettings({
           tweetPrefix,
-          aiBackend,
-          ...openaiApiKey ? { openaiApiKey } : {},
           ...anthropicApiKey ? { anthropicApiKey } : {}
         });
         alert("Settings saved successfully");
-        openaiApiKeyField.value = "";
         anthropicApiKeyField.value = "";
       } catch (error46) {
         console.error("Error saving settings:", error46);

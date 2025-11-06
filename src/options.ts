@@ -1,4 +1,4 @@
-import { getAIBackend, getTweetPrefix, saveSettings } from './lib';
+import { getSystemPrompt, saveSettings } from './lib';
 
 /**
  * Options page script for the Tweet Moderator extension
@@ -14,19 +14,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Type-safe form field access
   const tweetPrefixField = form.elements.namedItem('tweetPrefix');
-  const openaiApiKeyField = form.elements.namedItem('openaiApiKey');
   const anthropicApiKeyField = form.elements.namedItem('anthropicApiKey');
-  const aiBackendField = form.elements.namedItem('aiBackend');
 
   if (
     !tweetPrefixField ||
     !(tweetPrefixField instanceof HTMLTextAreaElement) ||
-    !openaiApiKeyField ||
-    !(openaiApiKeyField instanceof HTMLInputElement) ||
     !anthropicApiKeyField ||
-    !(anthropicApiKeyField instanceof HTMLInputElement) ||
-    !aiBackendField ||
-    !(aiBackendField instanceof HTMLSelectElement)
+    !(anthropicApiKeyField instanceof HTMLInputElement)
   ) {
     console.error('Form fields not found or have incorrect types');
     return;
@@ -34,11 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load current settings
   try {
-    const currentPrefix = await getTweetPrefix();
+    const currentPrefix = await getSystemPrompt();
     tweetPrefixField.value = currentPrefix;
-
-    const currentBackend = await getAIBackend();
-    aiBackendField.value = currentBackend;
   } catch (error) {
     console.error('Error loading settings:', error);
   }
@@ -48,27 +39,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
 
     const tweetPrefix = tweetPrefixField.value.trim();
-    const openaiApiKey = openaiApiKeyField.value.trim();
     const anthropicApiKey = anthropicApiKeyField.value.trim();
-    const aiBackend = aiBackendField.value as 'openai' | 'anthropic';
 
     if (!tweetPrefix) {
-      alert('Tweet prefix cannot be empty');
+      alert('System prompt cannot be empty');
       return;
     }
 
     try {
       await saveSettings({
         tweetPrefix,
-        aiBackend,
-        ...(openaiApiKey ? { openaiApiKey } : {}),
         ...(anthropicApiKey ? { anthropicApiKey } : {}),
       });
 
       alert('Settings saved successfully');
 
-      // Clear the API key fields after saving for security
-      openaiApiKeyField.value = '';
+      // Clear the API key field after saving for security
       anthropicApiKeyField.value = '';
     } catch (error) {
       console.error('Error saving settings:', error);
