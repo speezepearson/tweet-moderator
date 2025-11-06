@@ -13,7 +13,7 @@ describe('Cache Clearing Integration', () => {
   beforeEach(() => {
     // Mock chrome.storage.local
     const storage: Record<string, any> = {};
-    global.chrome = {
+    (globalThis as any).chrome = {
       storage: {
         local: {
           get: vi.fn((keys) => {
