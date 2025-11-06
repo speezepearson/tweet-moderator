@@ -1,5 +1,6 @@
-import { getOpenaiApiKey } from './lib';
-import { OpenAIClient } from './OpenAIClient';
+import { DEFAULT_MODELS } from './AIClient';
+import { BackgroundAIClient } from './BackgroundAIClient';
+import { getAIBackend } from './lib';
 import { TweetModerator } from './TweetModerator';
 
 /**
@@ -12,20 +13,18 @@ let observer: MutationObserver | null = null;
 
 /**
  * Initializes the tweet moderation system
- * Creates OpenAI client and TweetModerator instances
+ * Creates a BackgroundAIClient that proxies requests to the background script
  */
 async function initialize(): Promise<void> {
-  const apiKey = await getOpenaiApiKey();
-  if (!apiKey) {
-    console.warn(
-      'Tweet Moderator: No API key found. Please set your OpenAI API key in the extension settings.'
-    );
-    return;
-  }
+  const backend = await getAIBackend();
+  const model = DEFAULT_MODELS[backend];
+
+  // Use BackgroundAIClient to avoid CORS issues
+  // The background script will handle the actual API calls
+  const aiClient = new BackgroundAIClient(model);
 
   try {
-    const openAIClient = new OpenAIClient(apiKey);
-    moderator = new TweetModerator(openAIClient);
+    moderator = new TweetModerator(aiClient, model);
 
     // Process tweets that are already on the page
     await moderator.processAllTweets();
@@ -33,7 +32,7 @@ async function initialize(): Promise<void> {
     // Set up observer for new tweets
     startObserver();
 
-    console.log('Tweet Moderator: Initialized successfully');
+    console.log(`Tweet Moderator: Initialized successfully with ${backend} backend`);
   } catch (error) {
     console.error('Tweet Moderator: Failed to initialize:', error);
   }
@@ -67,7 +66,7 @@ function startObserver(): void {
         }
 
         // Check if descendants contain tweets
-        return node.querySelectorAll('[data-testid="tweetText"]').length > 0;
+        return node.querySelectorAll('[data-testid="tweet"]').length > 0;
       });
     });
 
@@ -115,10 +114,13 @@ initialize().catch((error) => {
 // Clean up when the page unloads
 window.addEventListener('unload', cleanup);
 
-// Listen for storage changes to reinitialize if API key changes
+// Listen for storage changes to reinitialize if settings change
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'sync' && changes.openaiApiKey) {
-    console.log('Tweet Moderator: API key changed, reinitializing...');
+  if (
+    areaName === 'sync' &&
+    (changes.openaiApiKey || changes.anthropicApiKey || changes.aiBackend)
+  ) {
+    console.log('Tweet Moderator: Settings changed, reinitializing...');
     cleanup();
     initialize().catch((error) => {
       console.error('Tweet Moderator: Reinitialization failed:', error);

@@ -33,6 +33,8 @@ export type Keywords = z.infer<typeof KeywordsSchema>;
 export const SettingsSchema = z.object({
   tweetPrefix: z.string().min(1),
   openaiApiKey: z.string().optional(),
+  anthropicApiKey: z.string().optional(),
+  aiBackend: z.enum(['openai', 'anthropic']).optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -87,6 +89,48 @@ export const OpenAIResponseSchema = z.object({
 export type OpenAIResponse = z.infer<typeof OpenAIResponseSchema>;
 
 /**
+ * Anthropic API message schema
+ */
+export const AnthropicMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+});
+export type AnthropicMessage = z.infer<typeof AnthropicMessageSchema>;
+
+/**
+ * Anthropic API request schema
+ */
+export const AnthropicRequestSchema = z.object({
+  model: z.string(),
+  messages: z.array(AnthropicMessageSchema),
+  max_tokens: z.number(),
+  temperature: z.number().optional(),
+});
+export type AnthropicRequest = z.infer<typeof AnthropicRequestSchema>;
+
+/**
+ * Anthropic API response schema
+ */
+export const AnthropicResponseSchema = z.object({
+  id: z.string(),
+  type: z.literal('message'),
+  role: z.literal('assistant'),
+  content: z.array(
+    z.object({
+      type: z.literal('text'),
+      text: z.string(),
+    })
+  ).min(1, 'Response must contain at least one content block'),
+  model: z.string(),
+  stop_reason: z.string().nullable(),
+  usage: z.object({
+    input_tokens: z.number(),
+    output_tokens: z.number(),
+  }),
+});
+export type AnthropicResponse = z.infer<typeof AnthropicResponseSchema>;
+
+/**
  * Cache entry schema
  */
 export const CacheEntrySchema = z.object({
@@ -119,6 +163,17 @@ export class OpenAIError extends Error {
   ) {
     super(message);
     this.name = 'OpenAIError';
+  }
+}
+
+export class AnthropicError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+    public readonly response?: unknown
+  ) {
+    super(message);
+    this.name = 'AnthropicError';
   }
 }
 

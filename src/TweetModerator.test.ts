@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TweetModerator } from './TweetModerator';
-import { OpenAIClient } from './OpenAIClient';
+import { AIClient } from './AIClient';
 import { CacheManager } from './CacheManager';
 import { keywords } from './lib';
 
@@ -14,14 +14,14 @@ vi.mock('./lib', async () => {
 });
 
 describe('TweetModerator', () => {
-  let mockOpenAIClient: OpenAIClient;
+  let mockAIClient: AIClient;
   let mockCacheManager: CacheManager;
   let moderator: TweetModerator;
 
   beforeEach(() => {
-    // Create mock OpenAI client
-    mockOpenAIClient = {
-      simpleChat: vi.fn(),
+    // Create mock AI client
+    mockAIClient = {
+      chat: vi.fn(),
     } as any;
 
     // Create mock cache manager
@@ -30,7 +30,7 @@ describe('TweetModerator', () => {
       set: vi.fn().mockResolvedValue(undefined),
     } as any;
 
-    moderator = new TweetModerator(mockOpenAIClient, mockCacheManager);
+    moderator = new TweetModerator(mockAIClient, 'test-model', mockCacheManager);
   });
 
   describe('hashTweet', () => {
@@ -68,12 +68,12 @@ describe('TweetModerator', () => {
       const result = await moderator.isTweetToxic(tweetText);
 
       expect(result).toBe(true);
-      expect(mockOpenAIClient.simpleChat).not.toHaveBeenCalled();
+      expect(mockAIClient.chat).not.toHaveBeenCalled();
     });
 
     it('should classify tweet as toxic when response contains bad keyword', async () => {
       const tweetText = 'This tweet is inflammatory';
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
+      (mockAIClient.chat as any).mockResolvedValue(
         `Analysis of the tweet... ${keywords.bad}`
       );
 
@@ -85,7 +85,7 @@ describe('TweetModerator', () => {
 
     it('should classify tweet as non-toxic when response contains good keyword', async () => {
       const tweetText = 'This is a nice tweet';
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
+      (mockAIClient.chat as any).mockResolvedValue(
         `Analysis of the tweet... ${keywords.good}`
       );
 
@@ -97,7 +97,7 @@ describe('TweetModerator', () => {
 
     it('should return false when both good and bad keywords are present', async () => {
       const tweetText = 'Ambiguous tweet';
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
+      (mockAIClient.chat as any).mockResolvedValue(
         `Contains both: ${keywords.bad} and ${keywords.good}`
       );
 
@@ -109,7 +109,7 @@ describe('TweetModerator', () => {
 
     it('should return false when neither keyword is present', async () => {
       const tweetText = 'Unclear response';
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
+      (mockAIClient.chat as any).mockResolvedValue(
         'This response has no classification keywords'
       );
 
@@ -120,7 +120,7 @@ describe('TweetModerator', () => {
 
     it('should return false on API error', async () => {
       const tweetText = 'Tweet causing API error';
-      (mockOpenAIClient.simpleChat as any).mockRejectedValue(new Error('API Error'));
+      (mockAIClient.chat as any).mockRejectedValue(new Error('API Error'));
 
       const result = await moderator.isTweetToxic(tweetText);
 
@@ -133,72 +133,70 @@ describe('TweetModerator', () => {
       const result = await moderator.isTweetToxic('');
 
       expect(result).toBe(false);
-      expect(mockOpenAIClient.simpleChat).not.toHaveBeenCalled();
+      expect(mockAIClient.chat).not.toHaveBeenCalled();
     });
 
-    it('should call OpenAI with correct model', async () => {
+    it('should call AIClient with correct model', async () => {
       const tweetText = 'Test tweet';
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
+      (mockAIClient.chat as any).mockResolvedValue(
         `Response ${keywords.good}`
       );
 
       await moderator.isTweetToxic(tweetText);
 
-      expect(mockOpenAIClient.simpleChat).toHaveBeenCalledWith(
+      expect(mockAIClient.chat).toHaveBeenCalledWith(
         expect.stringContaining(tweetText),
-        'gpt-4o'
+        'test-model'
       );
     });
   });
 
+
+  // Skipping DOM-related tests since we're not mocking the DOM environment
+  // isTweetNode and findTweetNodes would need DOM mocking
+
   describe('processTweet', () => {
-    it('should hide toxic tweet by removing parent article', async () => {
-      const mockTweetNode = {
+    it('should hide toxic tweet by removing the tweet node', async () => {
+      const mockTweetTextElement = {
         innerText: 'Toxic tweet content',
-        parentElement: {
-          tagName: 'DIV',
-          parentElement: {
-            tagName: 'ARTICLE',
-            remove: vi.fn(),
-          },
-        },
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        remove: vi.fn(),
       } as any;
 
       (mockCacheManager.get as any).mockResolvedValue(undefined);
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
-        `Toxic ${keywords.bad}`
-      );
+      (mockAIClient.chat as any).mockResolvedValue(`Toxic ${keywords.bad}`);
 
       await moderator.processTweet(mockTweetNode);
 
-      expect(mockTweetNode.parentElement.parentElement.remove).toHaveBeenCalled();
+      expect(mockTweetNode.querySelector).toHaveBeenCalledWith('[data-testid="tweetText"]');
+      expect(mockTweetNode.remove).toHaveBeenCalled();
     });
 
     it('should not hide non-toxic tweet', async () => {
-      const mockTweetNode = {
+      const mockTweetTextElement = {
         innerText: 'Nice tweet content',
-        parentElement: {
-          tagName: 'DIV',
-          parentElement: {
-            tagName: 'ARTICLE',
-            remove: vi.fn(),
-          },
-        },
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        remove: vi.fn(),
       } as any;
 
       (mockCacheManager.get as any).mockResolvedValue(undefined);
-      (mockOpenAIClient.simpleChat as any).mockResolvedValue(
-        `Not toxic ${keywords.good}`
-      );
+      (mockAIClient.chat as any).mockResolvedValue(`Not toxic ${keywords.good}`);
 
       await moderator.processTweet(mockTweetNode);
 
-      expect(mockTweetNode.parentElement.parentElement.remove).not.toHaveBeenCalled();
+      expect(mockTweetNode.remove).not.toHaveBeenCalled();
     });
 
     it('should not process same tweet twice', async () => {
-      const mockTweetNode = {
+      const mockTweetTextElement = {
         innerText: 'Test tweet',
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
       } as any;
 
       await moderator.processTweet(mockTweetNode);
@@ -208,26 +206,26 @@ describe('TweetModerator', () => {
       expect(mockCacheManager.get).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle missing parent article gracefully', async () => {
+    it('should handle empty tweet text gracefully', async () => {
       const mockTweetNode = {
-        innerText: 'Toxic tweet',
-        parentElement: null,
+        querySelector: vi.fn().mockReturnValue(null),
+        remove: vi.fn(),
       } as any;
 
-      (mockCacheManager.get as any).mockResolvedValue(true);
+      await moderator.processTweet(mockTweetNode);
 
-      // Should not throw error
-      await expect(moderator.processTweet(mockTweetNode)).resolves.not.toThrow();
+      // Should not call remove on empty tweet
+      expect(mockTweetNode.remove).not.toHaveBeenCalled();
     });
   });
 
-  // Skipping DOM-related tests since we're not mocking the DOM environment
-  // isTweetNode and findTweetNodes would need DOM mocking
-
   describe('resetProcessedTweets', () => {
     it('should allow reprocessing tweets after reset', async () => {
-      const mockTweetNode = {
+      const mockTweetTextElement = {
         innerText: 'Test tweet',
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
       } as any;
 
       await moderator.processTweet(mockTweetNode);

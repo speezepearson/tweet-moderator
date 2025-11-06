@@ -6,6 +6,45 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
+  // src/AIClient.ts
+  var DEFAULT_MODELS = {
+    openai: "gpt-4o",
+    anthropic: "claude-sonnet-4-5-20250929"
+  };
+
+  // src/BackgroundAIClient.ts
+  var BackgroundAIClient = class {
+    constructor(model) {
+      this.model = model;
+    }
+    async chat(message, model) {
+      return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type: "CHECK_TWEET",
+            message,
+            model: model || this.model
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (!response) {
+              reject(new Error("No response from background script"));
+              return;
+            }
+            if (response.success) {
+              resolve(response.response);
+            } else {
+              reject(new Error(response.error || "Unknown error"));
+            }
+          }
+        );
+      });
+    }
+  };
+
   // node_modules/zod/v4/classic/external.js
   var external_exports = {};
   __export(external_exports, {
@@ -12558,7 +12597,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   });
   var SettingsSchema = external_exports.object({
     tweetPrefix: external_exports.string().min(1),
-    openaiApiKey: external_exports.string().optional()
+    openaiApiKey: external_exports.string().optional(),
+    anthropicApiKey: external_exports.string().optional(),
+    aiBackend: external_exports.enum(["openai", "anthropic"]).optional()
   });
   var OpenAIMessageSchema = external_exports.object({
     role: external_exports.enum(["system", "user", "assistant"]),
@@ -12591,6 +12632,33 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       total_tokens: external_exports.number()
     }).optional()
   });
+  var AnthropicMessageSchema = external_exports.object({
+    role: external_exports.enum(["user", "assistant"]),
+    content: external_exports.string()
+  });
+  var AnthropicRequestSchema = external_exports.object({
+    model: external_exports.string(),
+    messages: external_exports.array(AnthropicMessageSchema),
+    max_tokens: external_exports.number(),
+    temperature: external_exports.number().optional()
+  });
+  var AnthropicResponseSchema = external_exports.object({
+    id: external_exports.string(),
+    type: external_exports.literal("message"),
+    role: external_exports.literal("assistant"),
+    content: external_exports.array(
+      external_exports.object({
+        type: external_exports.literal("text"),
+        text: external_exports.string()
+      })
+    ).min(1, "Response must contain at least one content block"),
+    model: external_exports.string(),
+    stop_reason: external_exports.string().nullable(),
+    usage: external_exports.object({
+      input_tokens: external_exports.number(),
+      output_tokens: external_exports.number()
+    })
+  });
   var CacheEntrySchema = external_exports.object({
     hash: TweetHashSchema,
     toxic: external_exports.boolean(),
@@ -12612,11 +12680,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       this.name = "OpenAIError";
     }
   };
-  var ValidationError = class extends Error {
-    constructor(message, zodError) {
+  var AnthropicError = class extends Error {
+    constructor(message, statusCode, response) {
       super(message);
-      this.zodError = zodError;
-      this.name = "ValidationError";
+      this.statusCode = statusCode;
+      this.response = response;
+      this.name = "AnthropicError";
     }
   };
   var CacheError = class extends Error {
@@ -12663,82 +12732,14 @@ Here is the tweet:
     }
     return tweetPrefix;
   }
-  async function getOpenaiApiKey() {
-    const result = await chrome.storage.sync.get(["openaiApiKey"]);
-    const apiKey = result.openaiApiKey;
-    if (apiKey && typeof apiKey !== "string") {
-      console.warn("Invalid openaiApiKey in storage");
-      return void 0;
+  async function getAIBackend() {
+    const result = await chrome.storage.sync.get(["aiBackend"]);
+    const backend = result.aiBackend;
+    if (backend === "openai" || backend === "anthropic") {
+      return backend;
     }
-    return apiKey;
+    return "openai";
   }
-
-  // src/OpenAIClient.ts
-  var OpenAIClient = class {
-    constructor(apiKey) {
-      this.baseUrl = "https://api.openai.com/v1";
-      this.apiKey = apiKey;
-    }
-    /**
-     * Makes a chat completion request to OpenAI API
-     * Validates the response and provides detailed error handling
-     *
-     * @param request - The OpenAI request parameters
-     * @returns Validated OpenAI response
-     * @throws {OpenAIError} If the API request fails
-     * @throws {ValidationError} If the response format is invalid
-     */
-    async chatCompletion(request) {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify(request)
-      });
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown error");
-        throw new OpenAIError(
-          `OpenAI API request failed: ${response.statusText}`,
-          response.status,
-          errorText
-        );
-      }
-      let responseData;
-      try {
-        responseData = await response.json();
-      } catch (error46) {
-        throw new OpenAIError("Failed to parse OpenAI API response as JSON", response.status);
-      }
-      const parseResult = OpenAIResponseSchema.safeParse(responseData);
-      if (!parseResult.success) {
-        throw new ValidationError(
-          "OpenAI API response does not match expected schema",
-          parseResult.error
-        );
-      }
-      return parseResult.data;
-    }
-    /**
-     * Helper method to create a simple chat completion with a single user message
-     *
-     * @param message - The user message to send
-     * @param model - The model to use (defaults to gpt-4o-mini)
-     * @returns The assistant's response text
-     */
-    async simpleChat(message, model = "gpt-4o-mini") {
-      const response = await this.chatCompletion({
-        model,
-        messages: [{ role: "user", content: message }]
-      });
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new OpenAIError("OpenAI response missing content");
-      }
-      return content;
-    }
-  };
 
   // src/CacheManager.ts
   var CacheManager = class {
@@ -12872,9 +12873,10 @@ Here is the tweet:
 
   // src/TweetModerator.ts
   var TweetModerator = class _TweetModerator {
-    constructor(openAIClient, cacheManager) {
+    constructor(aiClient, model, cacheManager) {
       this.processedTweets = /* @__PURE__ */ new Set();
-      this.openAIClient = openAIClient;
+      this.aiClient = aiClient;
+      this.model = model;
       this.cacheManager = cacheManager || getCacheManager();
     }
     /**
@@ -12891,7 +12893,7 @@ Here is the tweet:
       return TweetHashSchema.parse(hashWithPrefix);
     }
     /**
-     * Checks if a tweet is toxic using OpenAI API
+     * Checks if a tweet is toxic using AI API
      * Results are cached for performance
      *
      * @param text - The tweet text to check
@@ -12912,7 +12914,7 @@ Here is the tweet:
       try {
         console.log("Checking tweet:", text);
         const prefix = await getTweetPrefix();
-        const responseText = await this.openAIClient.simpleChat(prefix + text, "gpt-4o");
+        const responseText = await this.aiClient.chat(prefix + text, this.model);
         const lastChars = responseText.slice(-(maxKeywordLength + 5));
         const hasGood = lastChars.includes(keywords.good);
         const hasBad = lastChars.includes(keywords.bad);
@@ -12927,8 +12929,8 @@ Here is the tweet:
         });
         return isToxic;
       } catch (error46) {
-        if (error46 instanceof OpenAIError) {
-          console.error("OpenAI API error:", error46.message, error46.statusCode);
+        if (error46 instanceof OpenAIError || error46 instanceof AnthropicError) {
+          console.error("AI API error:", error46.message, error46.statusCode);
           return false;
         }
         console.error("Error moderating tweet:", error46);
@@ -12938,25 +12940,25 @@ Here is the tweet:
     /**
      * Processes a tweet node, checking if it's toxic and hiding it if needed
      *
-     * @param tweetNode - The DOM element containing the tweet text
+     * @param tweetNode - The DOM element containing the tweet (article with data-testid="tweet")
      */
     async processTweet(tweetNode) {
       if (this.processedTweets.has(tweetNode)) {
         return;
       }
       this.processedTweets.add(tweetNode);
-      const text = tweetNode.innerText;
+      const tweetTextElement = tweetNode.querySelector(
+        '[data-testid="tweetText"]'
+      );
+      const text = tweetTextElement?.innerText;
       if (!text) {
         return;
       }
       try {
         const isToxic = await this.isTweetToxic(text);
         if (isToxic) {
-          const parentArticle = this.getParentArticle(tweetNode);
-          if (parentArticle) {
-            console.log("Hiding toxic tweet:", text);
-            parentArticle.remove();
-          }
+          console.log("Hiding toxic tweet:", text);
+          tweetNode.remove();
         }
       } catch (error46) {
         console.error("Error processing tweet:", error46);
@@ -12964,30 +12966,20 @@ Here is the tweet:
       }
     }
     /**
-     * Finds the parent <article> element containing a tweet
-     * Twitter/X wraps each tweet in an article tag
-     */
-    getParentArticle(node) {
-      let parent = node;
-      while (parent && parent.tagName !== "ARTICLE") {
-        parent = parent.parentElement;
       }
-      return parent;
-    }
-    /**
-     * Checks if a DOM element is a tweet text node
-     */
+    
+      /**
+       * Checks if a DOM element is a tweet node
+       */
     static isTweetNode(node) {
-      return node.getAttribute("data-testid") === "tweetText" && node instanceof HTMLElement;
+      return node.getAttribute("data-testid") === "tweet" && node instanceof HTMLElement;
     }
     /**
      * Finds all tweet nodes on the page that match Twitter's structure
-     * Uses the class name that Twitter applies to tweet text containers
      */
     static findTweetNodes() {
-      const tweetClass = "r-8akbws";
-      const elements = Array.from(document.getElementsByClassName(tweetClass));
-      return elements.filter((el) => _TweetModerator.isTweetNode(el));
+      const elements = Array.from(document.querySelectorAll('[data-testid="tweet"]'));
+      return elements.filter((el) => el instanceof HTMLElement);
     }
     /**
      * Processes all tweets currently visible on the page
@@ -13009,19 +13001,14 @@ Here is the tweet:
   var moderator = null;
   var observer = null;
   async function initialize() {
-    const apiKey = await getOpenaiApiKey();
-    if (!apiKey) {
-      console.warn(
-        "Tweet Moderator: No API key found. Please set your OpenAI API key in the extension settings."
-      );
-      return;
-    }
+    const backend = await getAIBackend();
+    const model = DEFAULT_MODELS[backend];
+    const aiClient = new BackgroundAIClient(model);
     try {
-      const openAIClient = new OpenAIClient(apiKey);
-      moderator = new TweetModerator(openAIClient);
+      moderator = new TweetModerator(aiClient, model);
       await moderator.processAllTweets();
       startObserver();
-      console.log("Tweet Moderator: Initialized successfully");
+      console.log(`Tweet Moderator: Initialized successfully with ${backend} backend`);
     } catch (error46) {
       console.error("Tweet Moderator: Failed to initialize:", error46);
     }
@@ -13043,7 +13030,7 @@ Here is the tweet:
           if (TweetModerator.isTweetNode(node)) {
             return true;
           }
-          return node.querySelectorAll('[data-testid="tweetText"]').length > 0;
+          return node.querySelectorAll('[data-testid="tweet"]').length > 0;
         });
       });
       if (hasNewTweets && moderator) {
@@ -13074,8 +13061,8 @@ Here is the tweet:
   });
   window.addEventListener("unload", cleanup);
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "sync" && changes.openaiApiKey) {
-      console.log("Tweet Moderator: API key changed, reinitializing...");
+    if (areaName === "sync" && (changes.openaiApiKey || changes.anthropicApiKey || changes.aiBackend)) {
+      console.log("Tweet Moderator: Settings changed, reinitializing...");
       cleanup();
       initialize().catch((error46) => {
         console.error("Tweet Moderator: Reinitialization failed:", error46);

@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 import { build } from 'esbuild';
 import { copyFileSync, rmSync, mkdirSync } from 'fs';
+import { execSync } from 'child_process';
+
+// Run typecheck first
+console.log('Running typecheck...');
+try {
+  execSync('yarn typecheck', { stdio: 'inherit' });
+} catch (error) {
+  console.error('Typecheck failed. Build aborted.');
+  process.exit(1);
+}
 
 // Clean dist directory
 try {

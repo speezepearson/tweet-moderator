@@ -1,3 +1,4 @@
+import { AIBackend } from './AIClient';
 import { Keywords, Settings, SettingsSchema } from './types';
 
 /**
@@ -74,6 +75,37 @@ export async function getOpenaiApiKey(): Promise<string | undefined> {
 }
 
 /**
+ * Retrieves the Anthropic API key from storage
+ * Returns undefined if not set
+ */
+export async function getAnthropicApiKey(): Promise<string | undefined> {
+  const result = await chrome.storage.sync.get(['anthropicApiKey']);
+  const apiKey = result.anthropicApiKey;
+
+  if (apiKey && typeof apiKey !== 'string') {
+    console.warn('Invalid anthropicApiKey in storage');
+    return undefined;
+  }
+
+  return apiKey;
+}
+
+/**
+ * Retrieves the selected AI backend from storage
+ * Defaults to 'openai' if not set
+ */
+export async function getAIBackend(): Promise<AIBackend> {
+  const result = await chrome.storage.sync.get(['aiBackend']);
+  const backend = result.aiBackend;
+
+  if (backend === 'openai' || backend === 'anthropic') {
+    return backend;
+  }
+
+  return 'openai'; // Default to OpenAI
+}
+
+/**
  * Saves settings to Chrome storage
  */
 export async function saveSettings(settings: Partial<Settings>): Promise<void> {
@@ -86,5 +118,15 @@ export async function saveSettings(settings: Partial<Settings>): Promise<void> {
 
   if (validatedSettings.openaiApiKey !== undefined) {
     await chrome.storage.sync.set({ openaiApiKey: validatedSettings.openaiApiKey });
+  }
+
+  if (validatedSettings.anthropicApiKey !== undefined) {
+    await chrome.storage.sync.set({
+      anthropicApiKey: validatedSettings.anthropicApiKey,
+    });
+  }
+
+  if (validatedSettings.aiBackend !== undefined) {
+    await chrome.storage.sync.set({ aiBackend: validatedSettings.aiBackend });
   }
 }

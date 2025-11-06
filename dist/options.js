@@ -12558,7 +12558,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   });
   var SettingsSchema = external_exports.object({
     tweetPrefix: external_exports.string().min(1),
-    openaiApiKey: external_exports.string().optional()
+    openaiApiKey: external_exports.string().optional(),
+    anthropicApiKey: external_exports.string().optional(),
+    aiBackend: external_exports.enum(["openai", "anthropic"]).optional()
   });
   var OpenAIMessageSchema = external_exports.object({
     role: external_exports.enum(["system", "user", "assistant"]),
@@ -12590,6 +12592,33 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       completion_tokens: external_exports.number(),
       total_tokens: external_exports.number()
     }).optional()
+  });
+  var AnthropicMessageSchema = external_exports.object({
+    role: external_exports.enum(["user", "assistant"]),
+    content: external_exports.string()
+  });
+  var AnthropicRequestSchema = external_exports.object({
+    model: external_exports.string(),
+    messages: external_exports.array(AnthropicMessageSchema),
+    max_tokens: external_exports.number(),
+    temperature: external_exports.number().optional()
+  });
+  var AnthropicResponseSchema = external_exports.object({
+    id: external_exports.string(),
+    type: external_exports.literal("message"),
+    role: external_exports.literal("assistant"),
+    content: external_exports.array(
+      external_exports.object({
+        type: external_exports.literal("text"),
+        text: external_exports.string()
+      })
+    ).min(1, "Response must contain at least one content block"),
+    model: external_exports.string(),
+    stop_reason: external_exports.string().nullable(),
+    usage: external_exports.object({
+      input_tokens: external_exports.number(),
+      output_tokens: external_exports.number()
+    })
   });
   var CacheEntrySchema = external_exports.object({
     hash: TweetHashSchema,
@@ -12642,6 +12671,14 @@ Here is the tweet:
     }
     return tweetPrefix;
   }
+  async function getAIBackend() {
+    const result = await chrome.storage.sync.get(["aiBackend"]);
+    const backend = result.aiBackend;
+    if (backend === "openai" || backend === "anthropic") {
+      return backend;
+    }
+    return "openai";
+  }
   async function saveSettings(settings) {
     const validatedSettings = SettingsSchema.partial().parse(settings);
     if (validatedSettings.tweetPrefix !== void 0) {
@@ -12649,6 +12686,14 @@ Here is the tweet:
     }
     if (validatedSettings.openaiApiKey !== void 0) {
       await chrome.storage.sync.set({ openaiApiKey: validatedSettings.openaiApiKey });
+    }
+    if (validatedSettings.anthropicApiKey !== void 0) {
+      await chrome.storage.sync.set({
+        anthropicApiKey: validatedSettings.anthropicApiKey
+      });
+    }
+    if (validatedSettings.aiBackend !== void 0) {
+      await chrome.storage.sync.set({ aiBackend: validatedSettings.aiBackend });
     }
   }
 
@@ -12660,21 +12705,27 @@ Here is the tweet:
       return;
     }
     const tweetPrefixField = form.elements.namedItem("tweetPrefix");
-    const apiKeyField = form.elements.namedItem("openaiApiKey");
-    if (!tweetPrefixField || !(tweetPrefixField instanceof HTMLTextAreaElement) || !apiKeyField || !(apiKeyField instanceof HTMLInputElement)) {
+    const openaiApiKeyField = form.elements.namedItem("openaiApiKey");
+    const anthropicApiKeyField = form.elements.namedItem("anthropicApiKey");
+    const aiBackendField = form.elements.namedItem("aiBackend");
+    if (!tweetPrefixField || !(tweetPrefixField instanceof HTMLTextAreaElement) || !openaiApiKeyField || !(openaiApiKeyField instanceof HTMLInputElement) || !anthropicApiKeyField || !(anthropicApiKeyField instanceof HTMLInputElement) || !aiBackendField || !(aiBackendField instanceof HTMLSelectElement)) {
       console.error("Form fields not found or have incorrect types");
       return;
     }
     try {
       const currentPrefix = await getTweetPrefix();
       tweetPrefixField.value = currentPrefix;
+      const currentBackend = await getAIBackend();
+      aiBackendField.value = currentBackend;
     } catch (error46) {
       console.error("Error loading settings:", error46);
     }
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const tweetPrefix = tweetPrefixField.value.trim();
-      const openaiApiKey = apiKeyField.value.trim();
+      const openaiApiKey = openaiApiKeyField.value.trim();
+      const anthropicApiKey = anthropicApiKeyField.value.trim();
+      const aiBackend = aiBackendField.value;
       if (!tweetPrefix) {
         alert("Tweet prefix cannot be empty");
         return;
@@ -12682,13 +12733,18 @@ Here is the tweet:
       try {
         await saveSettings({
           tweetPrefix,
-          ...openaiApiKey ? { openaiApiKey } : {}
+          aiBackend,
+          ...openaiApiKey ? { openaiApiKey } : {},
+          ...anthropicApiKey ? { anthropicApiKey } : {}
         });
         alert("Settings saved successfully");
-        apiKeyField.value = "";
+        openaiApiKeyField.value = "";
+        anthropicApiKeyField.value = "";
       } catch (error46) {
         console.error("Error saving settings:", error46);
-        alert(`Failed to save settings: ${error46 instanceof Error ? error46.message : String(error46)}`);
+        alert(
+          `Failed to save settings: ${error46 instanceof Error ? error46.message : String(error46)}`
+        );
       }
     });
   });

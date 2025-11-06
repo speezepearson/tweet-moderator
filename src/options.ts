@@ -1,4 +1,4 @@
-import { getTweetPrefix, saveSettings } from './lib';
+import { getAIBackend, getTweetPrefix, saveSettings } from './lib';
 
 /**
  * Options page script for the Tweet Moderator extension
@@ -14,13 +14,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Type-safe form field access
   const tweetPrefixField = form.elements.namedItem('tweetPrefix');
-  const apiKeyField = form.elements.namedItem('openaiApiKey');
+  const openaiApiKeyField = form.elements.namedItem('openaiApiKey');
+  const anthropicApiKeyField = form.elements.namedItem('anthropicApiKey');
+  const aiBackendField = form.elements.namedItem('aiBackend');
 
   if (
     !tweetPrefixField ||
     !(tweetPrefixField instanceof HTMLTextAreaElement) ||
-    !apiKeyField ||
-    !(apiKeyField instanceof HTMLInputElement)
+    !openaiApiKeyField ||
+    !(openaiApiKeyField instanceof HTMLInputElement) ||
+    !anthropicApiKeyField ||
+    !(anthropicApiKeyField instanceof HTMLInputElement) ||
+    !aiBackendField ||
+    !(aiBackendField instanceof HTMLSelectElement)
   ) {
     console.error('Form fields not found or have incorrect types');
     return;
@@ -30,6 +36,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const currentPrefix = await getTweetPrefix();
     tweetPrefixField.value = currentPrefix;
+
+    const currentBackend = await getAIBackend();
+    aiBackendField.value = currentBackend;
   } catch (error) {
     console.error('Error loading settings:', error);
   }
@@ -39,7 +48,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
 
     const tweetPrefix = tweetPrefixField.value.trim();
-    const openaiApiKey = apiKeyField.value.trim();
+    const openaiApiKey = openaiApiKeyField.value.trim();
+    const anthropicApiKey = anthropicApiKeyField.value.trim();
+    const aiBackend = aiBackendField.value as 'openai' | 'anthropic';
 
     if (!tweetPrefix) {
       alert('Tweet prefix cannot be empty');
@@ -49,16 +60,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       await saveSettings({
         tweetPrefix,
+        aiBackend,
         ...(openaiApiKey ? { openaiApiKey } : {}),
+        ...(anthropicApiKey ? { anthropicApiKey } : {}),
       });
 
       alert('Settings saved successfully');
 
-      // Clear the API key field after saving for security
-      apiKeyField.value = '';
+      // Clear the API key fields after saving for security
+      openaiApiKeyField.value = '';
+      anthropicApiKeyField.value = '';
     } catch (error) {
       console.error('Error saving settings:', error);
-      alert(`Failed to save settings: ${error instanceof Error ? error.message : String(error)}`);
+      alert(
+        `Failed to save settings: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   });
 });

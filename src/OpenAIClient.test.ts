@@ -190,12 +190,12 @@ describe('OpenAIClient', () => {
       expect(result).toBe(responseText);
     });
 
-    it('should use default model gpt-4o-mini', async () => {
+    it('should use default model gpt-4o', async () => {
       const mockResponse = {
         id: 'chatcmpl-123',
         object: 'chat.completion',
         created: 1234567890,
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',
         choices: [
           {
             index: 0,
@@ -217,7 +217,7 @@ describe('OpenAIClient', () => {
 
       const fetchCall = (global.fetch as any).mock.calls[0];
       const requestBody = JSON.parse(fetchCall[1].body);
-      expect(requestBody.model).toBe('gpt-4o-mini');
+      expect(requestBody.model).toBe('gpt-4o');
     });
 
     it('should accept custom model', async () => {

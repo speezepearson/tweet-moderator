@@ -1,3 +1,4 @@
+import { AIClient } from './AIClient';
 import {
   ApiKey,
   OpenAIError,
@@ -11,7 +12,7 @@ import {
  * Client for interacting with the OpenAI API
  * Handles authentication, request formatting, response validation, and error handling
  */
-export class OpenAIClient {
+export class OpenAIClient implements AIClient {
   private readonly apiKey: string;
   private readonly baseUrl = 'https://api.openai.com/v1';
 
@@ -67,13 +68,14 @@ export class OpenAIClient {
   }
 
   /**
-   * Helper method to create a simple chat completion with a single user message
+   * Sends a chat message and returns the response text
+   * Implements the AIClient interface
    *
    * @param message - The user message to send
-   * @param model - The model to use (defaults to gpt-4o-mini)
+   * @param model - The model to use (defaults to gpt-4o)
    * @returns The assistant's response text
    */
-  async simpleChat(message: string, model = 'gpt-4o-mini'): Promise<string> {
+  async chat(message: string, model = 'gpt-4o'): Promise<string> {
     const response = await this.chatCompletion({
       model,
       messages: [{ role: 'user', content: message }],
@@ -85,6 +87,18 @@ export class OpenAIClient {
     }
 
     return content;
+  }
+
+  /**
+   * @deprecated Use chat() instead
+   * Helper method to create a simple chat completion with a single user message
+   *
+   * @param message - The user message to send
+   * @param model - The model to use (defaults to gpt-4o)
+   * @returns The assistant's response text
+   */
+  async simpleChat(message: string, model = 'gpt-4o'): Promise<string> {
+    return this.chat(message, model);
   }
 }
 
