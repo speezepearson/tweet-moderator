@@ -13658,7 +13658,6 @@ Now, evaluate the following NEW tweet (ignore all examples above):
       }
       this.processedTweets.add(tweetNode);
       tweetNode.style.opacity = "0";
-      tweetNode.style.transition = "opacity 0.3s ease-in";
       const tweetTextElement = tweetNode.querySelector(
         '[data-testid="tweetText"]'
       );

@@ -176,7 +176,7 @@ describe('TweetModerator', () => {
       expect(mockTweetNode.style.opacity).toBe('0');
     });
 
-    it('should fade in non-toxic tweet', async () => {
+    it('should show non-toxic tweet', async () => {
       const mockTweetTextElement = {
         innerText: 'Nice tweet content',
       };
@@ -193,7 +193,6 @@ describe('TweetModerator', () => {
 
       expect(mockTweetNode.remove).not.toHaveBeenCalled();
       expect(mockTweetNode.style.opacity).toBe('1');
-      expect(mockTweetNode.style.transition).toBe('opacity 0.3s ease-in');
     });
 
     it('should set tweet opacity to 0 while checking toxicity', async () => {
@@ -218,7 +217,6 @@ describe('TweetModerator', () => {
 
       // Opacity should be set to 0 immediately
       expect(mockTweetNode.style.opacity).toBe('0');
-      expect(mockTweetNode.style.transition).toBe('opacity 0.3s ease-in');
 
       // Complete the API call
       resolveChat(`Not toxic ${keywords.good}`);

@@ -284,7 +284,6 @@ export class TweetModerator {
 
     // Hide tweet immediately while checking toxicity
     tweetNode.style.opacity = '0';
-    tweetNode.style.transition = 'opacity 0.3s ease-in';
 
     // Extract text from the tweetText element within the article
     const tweetTextElement = tweetNode.querySelector(
