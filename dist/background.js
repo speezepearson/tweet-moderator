@@ -12596,14 +12596,36 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     toxic: external_exports.boolean(),
     timestamp: external_exports.number()
   });
+  var PersistentCacheEntrySchema = external_exports.object({
+    toxic: external_exports.boolean(),
+    timestamp: external_exports.number(),
+    reasoning: external_exports.string().optional()
+    // Full AI response text
+  });
   var PersistentCacheSchema = external_exports.record(
     external_exports.string(),
     // hash
-    external_exports.object({
-      toxic: external_exports.boolean(),
-      timestamp: external_exports.number()
-    })
+    PersistentCacheEntrySchema
   );
+  var TweetMetadataSchema = external_exports.object({
+    url: external_exports.string(),
+    author: external_exports.string(),
+    // @username
+    authorDisplayName: external_exports.string()
+  });
+  var FeedbackEntrySchema = external_exports.object({
+    hash: TweetHashSchema,
+    text: external_exports.string(),
+    url: external_exports.string(),
+    author: external_exports.string(),
+    // @username
+    authorDisplayName: external_exports.string(),
+    timestamp: external_exports.number(),
+    aiSaidToxic: external_exports.boolean(),
+    aiReasoning: external_exports.string(),
+    userSaysToxic: external_exports.boolean(),
+    userExplanation: external_exports.string()
+  });
   var AnthropicError = class extends Error {
     constructor(message, statusCode, response) {
       super(message);
@@ -12684,6 +12706,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
      * @returns The assistant's response text
      */
     async chat(message, model = "claude-sonnet-4-5-20250929", systemPrompt) {
+      console.log("SRP: chat", { message, model, systemPrompt });
       const response = await this.createMessage({
         model,
         max_tokens: 1024,
@@ -12726,10 +12749,6 @@ I'm going to give you a tweet. Please check whether it does any of the following
 (Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
 There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
 Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
-
-
-Here is the tweet:
-
 `
   };
   async function getAnthropicApiKey() {

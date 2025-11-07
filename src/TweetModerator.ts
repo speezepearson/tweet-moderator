@@ -1,11 +1,13 @@
 import { AIClient } from './AIClient';
 import { CacheManager, getCacheManager } from './CacheManager';
+import { getFeedbackModal } from './FeedbackModal';
 import { getSystemPrompt, keywords, maxKeywordLength } from './lib';
 import {
   AnthropicError,
   Tweet,
   TweetHash,
   TweetHashSchema,
+  TweetMetadata,
   TweetSchema,
 } from './types';
 
@@ -18,6 +20,7 @@ export class TweetModerator {
   private readonly model: string;
   private readonly cacheManager: CacheManager;
   private readonly processedTweets = new Set<HTMLElement>();
+  private readonly tweetsWithFeedback = new WeakSet<HTMLElement>();
 
   constructor(aiClient: AIClient, model: string, cacheManager?: CacheManager) {
     this.aiClient = aiClient;
@@ -38,6 +41,74 @@ export class TweetModerator {
 
     const hashWithPrefix = `${tweet.slice(0, 50)} ${hash}`;
     return TweetHashSchema.parse(hashWithPrefix);
+  }
+
+  /**
+   * Extracts metadata from a tweet DOM node
+   * Extracts URL, author username, and display name
+   *
+   * @param tweetNode - The tweet article element
+   * @returns Tweet metadata or null if extraction fails
+   */
+  extractTweetMetadata(tweetNode: HTMLElement): TweetMetadata | null {
+    try {
+      // Extract author username from href="/username" links
+      const authorLink = tweetNode.querySelector('a[href^="/"][role="link"]') as HTMLAnchorElement | null;
+      if (!authorLink) {
+        return null;
+      }
+
+      const authorHref = authorLink.getAttribute('href');
+      if (!authorHref) {
+        return null;
+      }
+
+      // Extract @username from href (format: "/username" or "/username/status/...")
+      const author = authorHref.split('/')[1];
+      if (!author) {
+        return null;
+      }
+
+      // Extract display name from User-Name section
+      const userNameSection = tweetNode.querySelector('[data-testid="User-Name"]');
+      let authorDisplayName = author; // Fallback to username
+
+      if (userNameSection) {
+        // Find the display name span (first one without @ symbol)
+        const nameSpans = Array.from(userNameSection.querySelectorAll('span'));
+        for (const span of nameSpans) {
+          const text = span.textContent?.trim();
+          if (text && !text.startsWith('@') && text !== '·' && !text.match(/^\w{3}\s\d+$/)) {
+            authorDisplayName = text;
+            break;
+          }
+        }
+      }
+
+      // Extract tweet URL from status link
+      const statusLink = tweetNode.querySelector('a[href*="/status/"]') as HTMLAnchorElement | null;
+      let url = `https://x.com/${author}`; // Fallback URL
+
+      if (statusLink) {
+        const statusHref = statusLink.getAttribute('href');
+        if (statusHref) {
+          // Extract status ID from href (format: "/username/status/1234567890")
+          const statusMatch = statusHref.match(/\/status\/(\d+)/);
+          if (statusMatch) {
+            url = `https://x.com${statusHref}`;
+          }
+        }
+      }
+
+      return {
+        url,
+        author: `@${author}`,
+        authorDisplayName,
+      };
+    } catch (error) {
+      console.warn('Failed to extract tweet metadata:', error);
+      return null;
+    }
   }
 
   /**
@@ -79,8 +150,8 @@ export class TweetModerator {
       const hasBad = lastChars.includes(keywords.bad);
       const isToxic = hasBad && !hasGood;
 
-      // Cache result
-      await this.cacheManager.set(hash, isToxic);
+      // Cache result with full reasoning
+      await this.cacheManager.set(hash, isToxic, responseText);
 
       console.log({
         text,
@@ -100,6 +171,103 @@ export class TweetModerator {
       console.error('Error moderating tweet:', error);
       return false;
     }
+  }
+
+  /**
+   * Creates and injects a feedback button into a tweet node
+   * Button allows users to provide feedback on AI classification
+   *
+   * @param tweetNode - The tweet article element
+   * @param tweetText - The tweet text content
+   * @param isToxic - Whether the tweet was classified as toxic
+   */
+  private createFeedbackButton(tweetNode: HTMLElement, tweetText: string, isToxic: boolean): void {
+    // Don't add button if already added
+    if (this.tweetsWithFeedback.has(tweetNode)) {
+      return;
+    }
+
+    // Skip in test environment where document is not available
+    if (typeof document === 'undefined') {
+      this.tweetsWithFeedback.add(tweetNode);
+      return;
+    }
+
+    // Create feedback button
+    const button = document.createElement('button');
+    button.setAttribute('data-testid', 'ai-feedback-button');
+    button.setAttribute('aria-label', 'Provide AI feedback');
+    button.textContent = 'AI Feedback';
+
+    // Style to match Twitter's subtle action buttons
+    Object.assign(button.style, {
+      position: 'absolute',
+      top: '12px',
+      right: '12px',
+      backgroundColor: 'transparent',
+      border: '1px solid rgb(207, 217, 222)',
+      borderRadius: '9999px',
+      padding: '4px 12px',
+      fontSize: '13px',
+      fontWeight: '700',
+      color: 'rgb(83, 100, 113)',
+      cursor: 'pointer',
+      opacity: '0',
+      transition: 'opacity 0.2s, background-color 0.2s',
+      zIndex: '10',
+    });
+
+    // Hover effects
+    button.addEventListener('mouseenter', () => {
+      button.style.backgroundColor = 'rgba(29, 155, 240, 0.1)';
+      button.style.borderColor = 'rgb(29, 155, 240)';
+      button.style.color = 'rgb(29, 155, 240)';
+    });
+
+    button.addEventListener('mouseleave', () => {
+      button.style.backgroundColor = 'transparent';
+      button.style.borderColor = 'rgb(207, 217, 222)';
+      button.style.color = 'rgb(83, 100, 113)';
+    });
+
+    // Click handler - opens feedback modal
+    button.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Get tweet metadata
+      const metadata = this.extractTweetMetadata(tweetNode);
+      if (!metadata) {
+        console.error('Failed to extract tweet metadata for feedback');
+        return;
+      }
+
+      // Get tweet hash
+      const tweet = TweetSchema.parse(tweetText);
+      const hash = await this.hashTweet(tweet);
+
+      // Open feedback modal
+      const feedbackModal = getFeedbackModal();
+      await feedbackModal.open(tweetText, hash, isToxic, metadata);
+    });
+
+    // Show button on tweet hover
+    tweetNode.addEventListener('mouseenter', () => {
+      button.style.opacity = '1';
+    });
+
+    tweetNode.addEventListener('mouseleave', () => {
+      button.style.opacity = '0';
+    });
+
+    // Make tweet position relative so button can be absolutely positioned
+    if (tweetNode.style.position !== 'relative' && tweetNode.style.position !== 'absolute') {
+      tweetNode.style.position = 'relative';
+    }
+
+    // Inject button into tweet
+    tweetNode.appendChild(button);
+    this.tweetsWithFeedback.add(tweetNode);
   }
 
   /**
@@ -138,6 +306,8 @@ export class TweetModerator {
       } else {
         // Safe tweet, fade it in
         tweetNode.style.opacity = '1';
+        // Add feedback button for non-toxic tweets
+        this.createFeedbackButton(tweetNode, text, isToxic);
       }
     } catch (error) {
       console.error('Error processing tweet:', error);

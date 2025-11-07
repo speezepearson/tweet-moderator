@@ -88,6 +88,7 @@ export class AnthropicClient implements AIClient {
     model = 'claude-sonnet-4-5-20250929',
     systemPrompt?: string
   ): Promise<string> {
+    console.log('SRP: chat', {message, model, systemPrompt});
     const response = await this.createMessage({
       model,
       max_tokens: 1024,

@@ -12630,14 +12630,36 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     toxic: external_exports.boolean(),
     timestamp: external_exports.number()
   });
+  var PersistentCacheEntrySchema = external_exports.object({
+    toxic: external_exports.boolean(),
+    timestamp: external_exports.number(),
+    reasoning: external_exports.string().optional()
+    // Full AI response text
+  });
   var PersistentCacheSchema = external_exports.record(
     external_exports.string(),
     // hash
-    external_exports.object({
-      toxic: external_exports.boolean(),
-      timestamp: external_exports.number()
-    })
+    PersistentCacheEntrySchema
   );
+  var TweetMetadataSchema = external_exports.object({
+    url: external_exports.string(),
+    author: external_exports.string(),
+    // @username
+    authorDisplayName: external_exports.string()
+  });
+  var FeedbackEntrySchema = external_exports.object({
+    hash: TweetHashSchema,
+    text: external_exports.string(),
+    url: external_exports.string(),
+    author: external_exports.string(),
+    // @username
+    authorDisplayName: external_exports.string(),
+    timestamp: external_exports.number(),
+    aiSaidToxic: external_exports.boolean(),
+    aiReasoning: external_exports.string(),
+    userSaysToxic: external_exports.boolean(),
+    userExplanation: external_exports.string()
+  });
   var AnthropicError = class extends Error {
     constructor(message, statusCode, response) {
       super(message);
@@ -12650,6 +12672,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     constructor(message) {
       super(message);
       this.name = "CacheError";
+    }
+  };
+  var FeedbackError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "FeedbackError";
     }
   };
 
@@ -12697,18 +12725,31 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       return void 0;
     }
     /**
+     * Retrieves the full cache entry including reasoning for a tweet hash
+     * Only checks persistent storage (reasoning not stored in memory cache)
+     *
+     * @param hash - The tweet hash to lookup
+     * @returns The full cache entry, or undefined if not cached
+     */
+    async getEntry(hash2) {
+      const persistentCache = await this.loadPersistentCache();
+      return persistentCache[hash2];
+    }
+    /**
      * Stores a toxicity result for a tweet hash
      * Updates both memory and persistent caches
      *
      * @param hash - The tweet hash
      * @param toxic - Whether the tweet is toxic
+     * @param reasoning - Optional AI reasoning for the classification
      */
-    async set(hash2, toxic) {
+    async set(hash2, toxic, reasoning) {
       this.memoryCache.set(hash2, toxic);
       const persistentCache = await this.loadPersistentCache();
       persistentCache[hash2] = {
         toxic,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        ...reasoning ? { reasoning } : {}
       };
       await this.evictIfNeeded(persistentCache);
       await this.savePersistentCache(persistentCache);
@@ -12796,6 +12837,530 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     return globalCacheManager;
   }
 
+  // src/FeedbackManager.ts
+  var FeedbackManager = class {
+    /**
+     * @param maxEntries - Maximum number of feedback entries to keep (default: 200)
+     * @param maxStorageSize - Maximum storage size in bytes (default: 2MB, well under 10MB limit)
+     */
+    constructor(maxEntries = 200, maxStorageSize = 2e6) {
+      this.maxEntries = maxEntries;
+      this.maxStorageSize = maxStorageSize;
+    }
+    /**
+     * Adds a feedback entry to storage
+     * Performs FIFO eviction if needed
+     *
+     * @param entry - The feedback entry to add
+     */
+    async addFeedback(entry) {
+      const entries = await this.loadFeedback();
+      entries.push(entry);
+      await this.evictIfNeeded(entries);
+      await this.saveFeedback(entries);
+    }
+    /**
+     * Retrieves all feedback entries
+     *
+     * @returns Array of feedback entries, sorted by timestamp (oldest first)
+     */
+    async getAllFeedback() {
+      return this.loadFeedback();
+    }
+    /**
+     * Deletes a specific feedback entry by hash
+     *
+     * @param hash - The tweet hash to delete feedback for
+     */
+    async deleteFeedback(hash2) {
+      const entries = await this.loadFeedback();
+      const filtered = entries.filter((entry) => entry.hash !== hash2);
+      await this.saveFeedback(filtered);
+    }
+    /**
+     * Clears all feedback entries
+     */
+    async clearAllFeedback() {
+      await setLocalStorage({ userFeedback: [] });
+    }
+    /**
+     * Returns the current number of feedback entries
+     */
+    async getFeedbackCount() {
+      const entries = await this.loadFeedback();
+      return entries.length;
+    }
+    /**
+     * Returns the current storage size in bytes
+     */
+    async getStorageSize() {
+      const entries = await this.loadFeedback();
+      return JSON.stringify(entries).length;
+    }
+    /**
+     * Loads feedback entries from chrome.storage.local
+     * Returns empty array if not found or invalid
+     */
+    async loadFeedback() {
+      const result = await getLocalStorage("userFeedback");
+      const entries = result.userFeedback || [];
+      if (!Array.isArray(entries)) {
+        console.warn("Invalid feedback structure in storage, resetting");
+        return [];
+      }
+      return entries;
+    }
+    /**
+     * Saves feedback entries to chrome.storage.local
+     */
+    async saveFeedback(entries) {
+      try {
+        await setLocalStorage({ userFeedback: entries });
+      } catch (error46) {
+        throw new FeedbackError(
+          `Failed to save feedback to storage: ${error46 instanceof Error ? error46.message : String(error46)}`
+        );
+      }
+    }
+    /**
+     * Evicts oldest entries if count or size limits are exceeded
+     * Uses FIFO based on timestamp
+     */
+    async evictIfNeeded(entries) {
+      while (entries.length > this.maxEntries) {
+        entries.sort((a, b) => a.timestamp - b.timestamp);
+        entries.shift();
+      }
+      let currentSize = JSON.stringify(entries).length;
+      while (currentSize > this.maxStorageSize && entries.length > 0) {
+        entries.sort((a, b) => a.timestamp - b.timestamp);
+        entries.shift();
+        currentSize = JSON.stringify(entries).length;
+      }
+    }
+  };
+  var globalFeedbackManager = null;
+  function getFeedbackManager() {
+    if (!globalFeedbackManager) {
+      globalFeedbackManager = new FeedbackManager();
+    }
+    return globalFeedbackManager;
+  }
+
+  // src/FeedbackModal.ts
+  var FeedbackModal = class {
+    constructor() {
+      this.modal = null;
+      this.isOpen = false;
+    }
+    /**
+     * Opens the feedback modal for a tweet
+     *
+     * @param tweetText - The tweet text content
+     * @param tweetHash - The hash of the tweet
+     * @param aiSaidToxic - Whether AI classified as toxic
+     * @param metadata - Tweet metadata (URL, author)
+     */
+    async open(tweetText, tweetHash, aiSaidToxic, metadata) {
+      if (this.isOpen) {
+        return;
+      }
+      const cacheManager = getCacheManager();
+      const cacheEntry = await cacheManager.getEntry(tweetHash);
+      const aiReasoning = cacheEntry?.reasoning || "No reasoning available";
+      this.isOpen = true;
+      this.createModal(tweetText, tweetHash, aiSaidToxic, aiReasoning, metadata);
+    }
+    /**
+     * Closes the feedback modal
+     */
+    close() {
+      if (this.modal) {
+        this.modal.remove();
+        this.modal = null;
+      }
+      this.isOpen = false;
+    }
+    /**
+     * Creates the modal DOM structure
+     */
+    createModal(tweetText, tweetHash, aiSaidToxic, aiReasoning, metadata) {
+      if (typeof document === "undefined") {
+        return;
+      }
+      const overlay = document.createElement("div");
+      overlay.setAttribute("data-testid", "feedback-modal-overlay");
+      Object.assign(overlay.style, {
+        position: "fixed",
+        top: "0",
+        left: "0",
+        width: "100%",
+        height: "100%",
+        backgroundColor: "rgba(0, 0, 0, 0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: "10000"
+      });
+      const modal = document.createElement("div");
+      modal.setAttribute("data-testid", "feedback-modal");
+      Object.assign(modal.style, {
+        backgroundColor: "rgb(255, 255, 255)",
+        borderRadius: "16px",
+        maxWidth: "600px",
+        width: "90%",
+        maxHeight: "80vh",
+        overflow: "auto",
+        boxShadow: "0 0 15px rgba(0, 0, 0, 0.2)",
+        padding: "24px"
+      });
+      const header = document.createElement("div");
+      header.style.marginBottom = "20px";
+      const title = document.createElement("h2");
+      title.textContent = "Provide AI Feedback";
+      Object.assign(title.style, {
+        fontSize: "20px",
+        fontWeight: "700",
+        margin: "0 0 8px 0",
+        color: "rgb(15, 20, 25)"
+      });
+      header.appendChild(title);
+      const subtitle = document.createElement("p");
+      subtitle.textContent = "Help improve the AI by correcting its classification";
+      Object.assign(subtitle.style, {
+        fontSize: "14px",
+        color: "rgb(83, 100, 113)",
+        margin: "0"
+      });
+      header.appendChild(subtitle);
+      modal.appendChild(header);
+      const tweetSection = this.createTweetPreview(tweetText, metadata);
+      modal.appendChild(tweetSection);
+      const aiSection = this.createAIDecisionSection(aiSaidToxic, aiReasoning);
+      modal.appendChild(aiSection);
+      const feedbackForm = this.createFeedbackForm(
+        tweetText,
+        tweetHash,
+        aiSaidToxic,
+        aiReasoning,
+        metadata
+      );
+      modal.appendChild(feedbackForm);
+      overlay.appendChild(modal);
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) {
+          this.close();
+        }
+      });
+      document.body.appendChild(overlay);
+      this.modal = overlay;
+    }
+    /**
+     * Creates the tweet preview section
+     */
+    createTweetPreview(tweetText, metadata) {
+      const section = document.createElement("div");
+      Object.assign(section.style, {
+        marginBottom: "20px",
+        padding: "16px",
+        backgroundColor: "rgb(247, 249, 249)",
+        borderRadius: "12px"
+      });
+      const label = document.createElement("div");
+      label.textContent = "Tweet";
+      Object.assign(label.style, {
+        fontSize: "13px",
+        fontWeight: "700",
+        color: "rgb(83, 100, 113)",
+        marginBottom: "8px"
+      });
+      section.appendChild(label);
+      const authorInfo = document.createElement("div");
+      Object.assign(authorInfo.style, {
+        fontSize: "14px",
+        color: "rgb(15, 20, 25)",
+        marginBottom: "8px"
+      });
+      const authorName = document.createElement("span");
+      authorName.textContent = metadata.authorDisplayName;
+      authorName.style.fontWeight = "700";
+      authorInfo.appendChild(authorName);
+      const authorHandle = document.createElement("span");
+      authorHandle.textContent = ` ${metadata.author}`;
+      authorHandle.style.color = "rgb(83, 100, 113)";
+      authorInfo.appendChild(authorHandle);
+      section.appendChild(authorInfo);
+      const text = document.createElement("div");
+      text.textContent = tweetText;
+      Object.assign(text.style, {
+        fontSize: "15px",
+        color: "rgb(15, 20, 25)",
+        lineHeight: "1.5",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word"
+      });
+      section.appendChild(text);
+      const link = document.createElement("a");
+      link.textContent = "View on X";
+      link.href = metadata.url;
+      link.target = "_blank";
+      Object.assign(link.style, {
+        display: "inline-block",
+        marginTop: "8px",
+        fontSize: "13px",
+        color: "rgb(29, 155, 240)",
+        textDecoration: "none"
+      });
+      link.addEventListener("mouseenter", () => {
+        link.style.textDecoration = "underline";
+      });
+      link.addEventListener("mouseleave", () => {
+        link.style.textDecoration = "none";
+      });
+      section.appendChild(link);
+      return section;
+    }
+    /**
+     * Creates the AI decision section
+     */
+    createAIDecisionSection(aiSaidToxic, aiReasoning) {
+      const section = document.createElement("div");
+      Object.assign(section.style, {
+        marginBottom: "20px",
+        padding: "16px",
+        backgroundColor: aiSaidToxic ? "rgb(254, 243, 242)" : "rgb(240, 255, 244)",
+        borderRadius: "12px",
+        border: aiSaidToxic ? "1px solid rgb(249, 24, 128)" : "1px solid rgb(0, 186, 124)"
+      });
+      const label = document.createElement("div");
+      label.textContent = "AI Classification";
+      Object.assign(label.style, {
+        fontSize: "13px",
+        fontWeight: "700",
+        color: "rgb(83, 100, 113)",
+        marginBottom: "8px"
+      });
+      section.appendChild(label);
+      const decision = document.createElement("div");
+      decision.textContent = aiSaidToxic ? "\u26A0\uFE0F Toxic" : "\u2705 Not Toxic";
+      Object.assign(decision.style, {
+        fontSize: "15px",
+        fontWeight: "700",
+        color: aiSaidToxic ? "rgb(249, 24, 128)" : "rgb(0, 186, 124)",
+        marginBottom: "12px"
+      });
+      section.appendChild(decision);
+      const reasoningLabel = document.createElement("div");
+      reasoningLabel.textContent = "AI Reasoning:";
+      Object.assign(reasoningLabel.style, {
+        fontSize: "13px",
+        fontWeight: "700",
+        color: "rgb(83, 100, 113)",
+        marginBottom: "6px"
+      });
+      section.appendChild(reasoningLabel);
+      const reasoning = document.createElement("div");
+      reasoning.textContent = aiReasoning;
+      Object.assign(reasoning.style, {
+        fontSize: "13px",
+        color: "rgb(15, 20, 25)",
+        lineHeight: "1.4",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        maxHeight: "150px",
+        overflow: "auto",
+        padding: "8px",
+        backgroundColor: "rgba(255, 255, 255, 0.5)",
+        borderRadius: "8px"
+      });
+      section.appendChild(reasoning);
+      return section;
+    }
+    /**
+     * Creates the user feedback form
+     */
+    createFeedbackForm(tweetText, tweetHash, aiSaidToxic, aiReasoning, metadata) {
+      const form = document.createElement("form");
+      form.setAttribute("data-testid", "feedback-form");
+      const question = document.createElement("div");
+      question.textContent = "Do you agree with this classification?";
+      Object.assign(question.style, {
+        fontSize: "15px",
+        fontWeight: "700",
+        color: "rgb(15, 20, 25)",
+        marginBottom: "12px"
+      });
+      form.appendChild(question);
+      const radioGroup = document.createElement("div");
+      radioGroup.style.marginBottom = "16px";
+      const agreeRadio = this.createRadioOption(
+        "feedback-agree",
+        "agree",
+        "Yes, the AI is correct"
+      );
+      const disagreeRadio = this.createRadioOption(
+        "feedback-disagree",
+        "disagree",
+        "No, the AI is wrong"
+      );
+      radioGroup.appendChild(agreeRadio.container);
+      radioGroup.appendChild(disagreeRadio.container);
+      form.appendChild(radioGroup);
+      const explanationLabel = document.createElement("label");
+      explanationLabel.textContent = "Why? (optional)";
+      Object.assign(explanationLabel.style, {
+        display: "block",
+        fontSize: "13px",
+        fontWeight: "700",
+        color: "rgb(83, 100, 113)",
+        marginBottom: "6px"
+      });
+      form.appendChild(explanationLabel);
+      const textarea = document.createElement("textarea");
+      textarea.setAttribute("data-testid", "feedback-explanation");
+      textarea.placeholder = "Explain why you agree or disagree...";
+      Object.assign(textarea.style, {
+        width: "100%",
+        minHeight: "80px",
+        padding: "12px",
+        fontSize: "14px",
+        border: "1px solid rgb(207, 217, 222)",
+        borderRadius: "8px",
+        resize: "vertical",
+        fontFamily: "inherit",
+        boxSizing: "border-box"
+      });
+      textarea.addEventListener("focus", () => {
+        textarea.style.borderColor = "rgb(29, 155, 240)";
+        textarea.style.outline = "none";
+      });
+      textarea.addEventListener("blur", () => {
+        textarea.style.borderColor = "rgb(207, 217, 222)";
+      });
+      form.appendChild(textarea);
+      const buttonContainer = document.createElement("div");
+      Object.assign(buttonContainer.style, {
+        display: "flex",
+        gap: "12px",
+        marginTop: "20px",
+        justifyContent: "flex-end"
+      });
+      const cancelButton = document.createElement("button");
+      cancelButton.type = "button";
+      cancelButton.textContent = "Cancel";
+      Object.assign(cancelButton.style, {
+        padding: "10px 20px",
+        fontSize: "15px",
+        fontWeight: "700",
+        border: "1px solid rgb(207, 217, 222)",
+        borderRadius: "9999px",
+        backgroundColor: "transparent",
+        color: "rgb(15, 20, 25)",
+        cursor: "pointer"
+      });
+      cancelButton.addEventListener("mouseenter", () => {
+        cancelButton.style.backgroundColor = "rgb(247, 249, 249)";
+      });
+      cancelButton.addEventListener("mouseleave", () => {
+        cancelButton.style.backgroundColor = "transparent";
+      });
+      cancelButton.addEventListener("click", () => {
+        this.close();
+      });
+      buttonContainer.appendChild(cancelButton);
+      const submitButton = document.createElement("button");
+      submitButton.type = "submit";
+      submitButton.textContent = "Submit Feedback";
+      submitButton.setAttribute("data-testid", "feedback-submit");
+      Object.assign(submitButton.style, {
+        padding: "10px 20px",
+        fontSize: "15px",
+        fontWeight: "700",
+        border: "none",
+        borderRadius: "9999px",
+        backgroundColor: "rgb(29, 155, 240)",
+        color: "rgb(255, 255, 255)",
+        cursor: "pointer"
+      });
+      submitButton.addEventListener("mouseenter", () => {
+        submitButton.style.backgroundColor = "rgb(26, 140, 216)";
+      });
+      submitButton.addEventListener("mouseleave", () => {
+        submitButton.style.backgroundColor = "rgb(29, 155, 240)";
+      });
+      buttonContainer.appendChild(submitButton);
+      form.appendChild(buttonContainer);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const userAgrees = agreeRadio.input.checked;
+        const userDisagrees = disagreeRadio.input.checked;
+        if (!userAgrees && !userDisagrees) {
+          alert("Please select whether you agree or disagree");
+          return;
+        }
+        const userSaysToxic = userDisagrees ? !aiSaidToxic : aiSaidToxic;
+        const userExplanation = textarea.value.trim();
+        const feedbackEntry = {
+          hash: tweetHash,
+          text: tweetText,
+          url: metadata.url,
+          author: metadata.author,
+          authorDisplayName: metadata.authorDisplayName,
+          timestamp: Date.now(),
+          aiSaidToxic,
+          aiReasoning,
+          userSaysToxic,
+          userExplanation: userExplanation || "(No explanation provided)"
+        };
+        const feedbackManager = getFeedbackManager();
+        await feedbackManager.addFeedback(feedbackEntry);
+        console.log("Feedback submitted:", feedbackEntry);
+        this.close();
+      });
+      return form;
+    }
+    /**
+     * Creates a radio button option
+     */
+    createRadioOption(id, name, label) {
+      const container = document.createElement("div");
+      Object.assign(container.style, {
+        display: "flex",
+        alignItems: "center",
+        marginBottom: "8px"
+      });
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.id = id;
+      input.name = "feedback";
+      input.value = name;
+      Object.assign(input.style, {
+        width: "20px",
+        height: "20px",
+        marginRight: "8px",
+        cursor: "pointer"
+      });
+      container.appendChild(input);
+      const labelElement = document.createElement("label");
+      labelElement.htmlFor = id;
+      labelElement.textContent = label;
+      Object.assign(labelElement.style, {
+        fontSize: "15px",
+        color: "rgb(15, 20, 25)",
+        cursor: "pointer"
+      });
+      container.appendChild(labelElement);
+      return { container, input };
+    }
+  };
+  var globalFeedbackModal = null;
+  function getFeedbackModal() {
+    if (!globalFeedbackModal) {
+      globalFeedbackModal = new FeedbackModal();
+    }
+    return globalFeedbackModal;
+  }
+
   // src/lib.ts
   var keywords = {
     good: "DOES NOT DO THE ABOVE",
@@ -12818,13 +13383,60 @@ I'm going to give you a tweet. Please check whether it does any of the following
 (Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
 There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
 Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
-
-
-Here is the tweet:
-
 `
   };
-  async function getSystemPrompt() {
+  async function formatFeedbackExamples() {
+    const feedbackManager = getFeedbackManager();
+    const feedbackEntries = await feedbackManager.getAllFeedback();
+    if (feedbackEntries.length === 0) {
+      return "";
+    }
+    const examples = feedbackEntries.map((entry, index) => {
+      const userDisagreed = entry.aiSaidToxic !== entry.userSaysToxic;
+      const aiClassification = entry.aiSaidToxic ? "toxic" : "not toxic";
+      const correctClassification = entry.userSaysToxic ? "toxic" : "not toxic";
+      const exampleType = userDisagreed ? "correction" : "confirmation";
+      if (!userDisagreed) {
+        return `<example id="${index + 1}" type="${exampleType}">
+  <tweet>${entry.text}</tweet>
+
+  <ai_classification>${aiClassification}</ai_classification>
+
+  <user_confirmation>
+    Correct, this tweet is ${correctClassification}
+    ${entry.userExplanation !== "(No explanation provided)" ? `
+    Note: ${entry.userExplanation}` : ""}
+  </user_confirmation>
+</example>`;
+      } else {
+        return `<example id="${index + 1}" type="${exampleType}">
+  <tweet>${entry.text}</tweet>
+
+  <ai_classification>${aiClassification}</ai_classification>
+
+  <ai_reasoning>
+${entry.aiReasoning}
+  </ai_reasoning>
+
+  <user_correction>
+    <correct_classification>${correctClassification}</correct_classification>
+    ${entry.userExplanation !== "(No explanation provided)" ? `<explanation>${entry.userExplanation}</explanation>` : ""}
+  </user_correction>
+</example>`;
+      }
+    });
+    return `
+IMPORTANT: Previous user feedback on classifications (learn from these examples):
+
+${examples.join("\n\n")}
+
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+Now, evaluate the following NEW tweet (ignore all examples above):
+
+`;
+  }
+  async function getBaseTweetPrefix() {
     const result = await getSyncStorage("tweetPrefix");
     const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
     if (typeof tweetPrefix !== "string") {
@@ -12833,11 +13445,17 @@ Here is the tweet:
     }
     return tweetPrefix;
   }
+  async function getSystemPrompt() {
+    const tweetPrefix = await getBaseTweetPrefix();
+    const feedbackSection = await formatFeedbackExamples();
+    return tweetPrefix + feedbackSection;
+  }
 
   // src/TweetModerator.ts
   var TweetModerator = class _TweetModerator {
     constructor(aiClient, model, cacheManager) {
       this.processedTweets = /* @__PURE__ */ new Set();
+      this.tweetsWithFeedback = /* @__PURE__ */ new WeakSet();
       this.aiClient = aiClient;
       this.model = model;
       this.cacheManager = cacheManager || getCacheManager();
@@ -12854,6 +13472,60 @@ Here is the tweet:
       const hash2 = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
       const hashWithPrefix = `${tweet.slice(0, 50)} ${hash2}`;
       return TweetHashSchema.parse(hashWithPrefix);
+    }
+    /**
+     * Extracts metadata from a tweet DOM node
+     * Extracts URL, author username, and display name
+     *
+     * @param tweetNode - The tweet article element
+     * @returns Tweet metadata or null if extraction fails
+     */
+    extractTweetMetadata(tweetNode) {
+      try {
+        const authorLink = tweetNode.querySelector('a[href^="/"][role="link"]');
+        if (!authorLink) {
+          return null;
+        }
+        const authorHref = authorLink.getAttribute("href");
+        if (!authorHref) {
+          return null;
+        }
+        const author = authorHref.split("/")[1];
+        if (!author) {
+          return null;
+        }
+        const userNameSection = tweetNode.querySelector('[data-testid="User-Name"]');
+        let authorDisplayName = author;
+        if (userNameSection) {
+          const nameSpans = Array.from(userNameSection.querySelectorAll("span"));
+          for (const span of nameSpans) {
+            const text = span.textContent?.trim();
+            if (text && !text.startsWith("@") && text !== "\xB7" && !text.match(/^\w{3}\s\d+$/)) {
+              authorDisplayName = text;
+              break;
+            }
+          }
+        }
+        const statusLink = tweetNode.querySelector('a[href*="/status/"]');
+        let url2 = `https://x.com/${author}`;
+        if (statusLink) {
+          const statusHref = statusLink.getAttribute("href");
+          if (statusHref) {
+            const statusMatch = statusHref.match(/\/status\/(\d+)/);
+            if (statusMatch) {
+              url2 = `https://x.com${statusHref}`;
+            }
+          }
+        }
+        return {
+          url: url2,
+          author: `@${author}`,
+          authorDisplayName
+        };
+      } catch (error46) {
+        console.warn("Failed to extract tweet metadata:", error46);
+        return null;
+      }
     }
     /**
      * Checks if a tweet is toxic using AI API
@@ -12886,7 +13558,7 @@ Here is the tweet:
         const hasGood = lastChars.includes(keywords.good);
         const hasBad = lastChars.includes(keywords.bad);
         const isToxic = hasBad && !hasGood;
-        await this.cacheManager.set(hash2, isToxic);
+        await this.cacheManager.set(hash2, isToxic, responseText);
         console.log({
           text,
           responseText,
@@ -12903,6 +13575,77 @@ Here is the tweet:
         console.error("Error moderating tweet:", error46);
         return false;
       }
+    }
+    /**
+     * Creates and injects a feedback button into a tweet node
+     * Button allows users to provide feedback on AI classification
+     *
+     * @param tweetNode - The tweet article element
+     * @param tweetText - The tweet text content
+     * @param isToxic - Whether the tweet was classified as toxic
+     */
+    createFeedbackButton(tweetNode, tweetText, isToxic) {
+      if (this.tweetsWithFeedback.has(tweetNode)) {
+        return;
+      }
+      if (typeof document === "undefined") {
+        this.tweetsWithFeedback.add(tweetNode);
+        return;
+      }
+      const button = document.createElement("button");
+      button.setAttribute("data-testid", "ai-feedback-button");
+      button.setAttribute("aria-label", "Provide AI feedback");
+      button.textContent = "AI Feedback";
+      Object.assign(button.style, {
+        position: "absolute",
+        top: "12px",
+        right: "12px",
+        backgroundColor: "transparent",
+        border: "1px solid rgb(207, 217, 222)",
+        borderRadius: "9999px",
+        padding: "4px 12px",
+        fontSize: "13px",
+        fontWeight: "700",
+        color: "rgb(83, 100, 113)",
+        cursor: "pointer",
+        opacity: "0",
+        transition: "opacity 0.2s, background-color 0.2s",
+        zIndex: "10"
+      });
+      button.addEventListener("mouseenter", () => {
+        button.style.backgroundColor = "rgba(29, 155, 240, 0.1)";
+        button.style.borderColor = "rgb(29, 155, 240)";
+        button.style.color = "rgb(29, 155, 240)";
+      });
+      button.addEventListener("mouseleave", () => {
+        button.style.backgroundColor = "transparent";
+        button.style.borderColor = "rgb(207, 217, 222)";
+        button.style.color = "rgb(83, 100, 113)";
+      });
+      button.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const metadata = this.extractTweetMetadata(tweetNode);
+        if (!metadata) {
+          console.error("Failed to extract tweet metadata for feedback");
+          return;
+        }
+        const tweet = TweetSchema.parse(tweetText);
+        const hash2 = await this.hashTweet(tweet);
+        const feedbackModal = getFeedbackModal();
+        await feedbackModal.open(tweetText, hash2, isToxic, metadata);
+      });
+      tweetNode.addEventListener("mouseenter", () => {
+        button.style.opacity = "1";
+      });
+      tweetNode.addEventListener("mouseleave", () => {
+        button.style.opacity = "0";
+      });
+      if (tweetNode.style.position !== "relative" && tweetNode.style.position !== "absolute") {
+        tweetNode.style.position = "relative";
+      }
+      tweetNode.appendChild(button);
+      this.tweetsWithFeedback.add(tweetNode);
     }
     /**
      * Processes a tweet node, checking if it's toxic and hiding it if needed
@@ -12931,6 +13674,7 @@ Here is the tweet:
           tweetNode.remove();
         } else {
           tweetNode.style.opacity = "1";
+          this.createFeedbackButton(tweetNode, text, isToxic);
         }
       } catch (error46) {
         console.error("Error processing tweet:", error46);

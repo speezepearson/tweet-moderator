@@ -1,4 +1,4 @@
-import { PersistentCache } from './types';
+import { FeedbackEntry, PersistentCache } from './types';
 
 /**
  * Typed schema for chrome.storage.local
@@ -6,6 +6,7 @@ import { PersistentCache } from './types';
  */
 export interface LocalStorageSchema {
   tweetToxicityCache: PersistentCache;
+  userFeedback: FeedbackEntry[];
 }
 
 /**

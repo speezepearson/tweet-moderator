@@ -27,6 +27,19 @@
         <p>The extension caches moderation results to save API calls. Clear the cache if you've changed your system prompt and want to re-evaluate previously checked tweets.</p>
         <button id="clear-cache-btn" type="button">Clear Tweet Cache</button>
         <p id="cache-status" style="color: #666; font-size: 14px; margin-top: 10px;"></p>
+
+        <hr style="margin: 30px 0;">
+
+        <h2>Feedback History</h2>
+        <p>View and manage your feedback corrections. These examples are used to improve AI classification accuracy.</p>
+        <div style="margin-bottom: 15px;">
+            <button id="refresh-feedback-btn" type="button">Refresh Feedback</button>
+            <button id="clear-feedback-btn" type="button" style="margin-left: 10px;">Clear All Feedback</button>
+        </div>
+        <p id="feedback-stats" style="color: #666; font-size: 14px; margin-bottom: 15px;"></p>
+        <div id="feedback-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+            <p style="color: #999; text-align: center;">Loading feedback...</p>
+        </div>
     </div>
     <script src="options.js"></script>
 </body>

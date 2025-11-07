@@ -90,16 +90,50 @@ export const CacheEntrySchema = z.object({
 export type CacheEntry = z.infer<typeof CacheEntrySchema>;
 
 /**
+ * Persistent cache entry for a single tweet
+ */
+export const PersistentCacheEntrySchema = z.object({
+  toxic: z.boolean(),
+  timestamp: z.number(),
+  reasoning: z.string().optional(), // Full AI response text
+});
+export type PersistentCacheEntry = z.infer<typeof PersistentCacheEntrySchema>;
+
+/**
  * Persistent cache schema (stored in chrome.storage)
  */
 export const PersistentCacheSchema = z.record(
   z.string(), // hash
-  z.object({
-    toxic: z.boolean(),
-    timestamp: z.number(),
-  })
+  PersistentCacheEntrySchema
 );
 export type PersistentCache = z.infer<typeof PersistentCacheSchema>;
+
+/**
+ * Tweet metadata extracted from DOM
+ */
+export const TweetMetadataSchema = z.object({
+  url: z.string(),
+  author: z.string(), // @username
+  authorDisplayName: z.string(),
+});
+export type TweetMetadata = z.infer<typeof TweetMetadataSchema>;
+
+/**
+ * Feedback entry schema for user corrections
+ */
+export const FeedbackEntrySchema = z.object({
+  hash: TweetHashSchema,
+  text: z.string(),
+  url: z.string(),
+  author: z.string(), // @username
+  authorDisplayName: z.string(),
+  timestamp: z.number(),
+  aiSaidToxic: z.boolean(),
+  aiReasoning: z.string(),
+  userSaysToxic: z.boolean(),
+  userExplanation: z.string(),
+});
+export type FeedbackEntry = z.infer<typeof FeedbackEntrySchema>;
 
 /**
  * Error types for better error handling
@@ -126,5 +160,12 @@ export class CacheError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CacheError';
+  }
+}
+
+export class FeedbackError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FeedbackError';
   }
 }

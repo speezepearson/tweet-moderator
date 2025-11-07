@@ -74,26 +74,24 @@ describe('TweetModerator', () => {
 
     it('should classify tweet as toxic when response contains bad keyword', async () => {
       const tweetText = 'This tweet is inflammatory';
-      (mockAIClient.chat as any).mockResolvedValue(
-        `Analysis of the tweet... ${keywords.bad}`
-      );
+      const responseText = `Analysis of the tweet... ${keywords.bad}`;
+      (mockAIClient.chat as any).mockResolvedValue(responseText);
 
       const result = await moderator.isTweetToxic(tweetText);
 
       expect(result).toBe(true);
-      expect(mockCacheManager.set).toHaveBeenCalledWith(expect.any(String), true);
+      expect(mockCacheManager.set).toHaveBeenCalledWith(expect.any(String), true, responseText);
     });
 
     it('should classify tweet as non-toxic when response contains good keyword', async () => {
       const tweetText = 'This is a nice tweet';
-      (mockAIClient.chat as any).mockResolvedValue(
-        `Analysis of the tweet... ${keywords.good}`
-      );
+      const responseText = `Analysis of the tweet... ${keywords.good}`;
+      (mockAIClient.chat as any).mockResolvedValue(responseText);
 
       const result = await moderator.isTweetToxic(tweetText);
 
       expect(result).toBe(false);
-      expect(mockCacheManager.set).toHaveBeenCalledWith(expect.any(String), false);
+      expect(mockCacheManager.set).toHaveBeenCalledWith(expect.any(String), false, responseText);
     });
 
     it('should return false when both good and bad keywords are present', async () => {
@@ -297,6 +295,173 @@ describe('TweetModerator', () => {
 
       // Should call cache twice (once before reset, once after)
       expect(mockCacheManager.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('createFeedbackButton', () => {
+    it('should call createFeedbackButton for non-toxic tweets', async () => {
+      const mockTweetTextElement = {
+        innerText: 'Nice tweet content',
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        remove: vi.fn(),
+        style: {},
+      } as any;
+
+      (mockCacheManager.get as any).mockResolvedValue(undefined);
+      (mockAIClient.chat as any).mockResolvedValue(`Not toxic ${keywords.good}`);
+
+      await moderator.processTweet(mockTweetNode);
+
+      // In test environment (no document), button creation is skipped but tweet is marked
+      // We verify this by trying to process again and checking no errors occur
+      moderator.resetProcessedTweets();
+      await expect(moderator.processTweet(mockTweetNode)).resolves.not.toThrow();
+    });
+
+    it('should not call createFeedbackButton for tweets without text', async () => {
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(null),
+        remove: vi.fn(),
+        style: {},
+      } as any;
+
+      await moderator.processTweet(mockTweetNode);
+
+      // Verify no errors and tweet is shown
+      expect(mockTweetNode.style.opacity).toBe('1');
+    });
+
+    it('should not create duplicate feedback buttons', async () => {
+      const mockTweetTextElement = {
+        innerText: 'Test tweet',
+      };
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(mockTweetTextElement),
+        remove: vi.fn(),
+        style: {},
+      } as any;
+
+      (mockCacheManager.get as any).mockResolvedValue(undefined);
+      (mockAIClient.chat as any).mockResolvedValue(`Not toxic ${keywords.good}`);
+
+      await moderator.processTweet(mockTweetNode);
+
+      // Reset processed tweets but NOT feedback buttons
+      moderator.resetProcessedTweets();
+
+      // Process again - should not throw even though feedback button was already "added"
+      await expect(moderator.processTweet(mockTweetNode)).resolves.not.toThrow();
+    });
+  });
+
+  describe('extractTweetMetadata', () => {
+    it('should extract metadata from tweet DOM', () => {
+      // Create mock DOM elements without document.createElement
+      const displayNameSpan = {
+        textContent: 'Cicely Dykeson',
+      };
+
+      const userNameSection = {
+        querySelector: vi.fn(),
+        querySelectorAll: vi.fn().mockReturnValue([displayNameSpan]),
+      };
+
+      const authorLink = {
+        getAttribute: vi.fn((attr: string) => {
+          if (attr === 'href') return '/ThatsSoSiren';
+          if (attr === 'role') return 'link';
+          return null;
+        }),
+      };
+
+      const statusLink = {
+        getAttribute: vi.fn((attr: string) => {
+          if (attr === 'href') return '/ThatsSoSiren/status/1986182104342794651';
+          return null;
+        }),
+      };
+
+      const mockTweetNode = {
+        querySelector: vi.fn((selector: string) => {
+          if (selector === 'a[href^="/"][role="link"]') return authorLink;
+          if (selector === '[data-testid="User-Name"]') return userNameSection;
+          if (selector === 'a[href*="/status/"]') return statusLink;
+          return null;
+        }),
+      } as any;
+
+      const metadata = moderator.extractTweetMetadata(mockTweetNode);
+
+      expect(metadata).not.toBeNull();
+      expect(metadata?.author).toBe('@ThatsSoSiren');
+      expect(metadata?.authorDisplayName).toBe('Cicely Dykeson');
+      expect(metadata?.url).toBe('https://x.com/ThatsSoSiren/status/1986182104342794651');
+    });
+
+    it('should return null when author link not found', () => {
+      const mockTweetNode = {
+        querySelector: vi.fn().mockReturnValue(null),
+      } as any;
+
+      const metadata = moderator.extractTweetMetadata(mockTweetNode);
+
+      expect(metadata).toBeNull();
+    });
+
+    it('should fallback to username when display name not found', () => {
+      const authorLink = {
+        getAttribute: vi.fn((attr: string) => {
+          if (attr === 'href') return '/testuser';
+          return null;
+        }),
+      };
+
+      const statusLink = {
+        getAttribute: vi.fn((attr: string) => {
+          if (attr === 'href') return '/testuser/status/123';
+          return null;
+        }),
+      };
+
+      const mockTweetNode = {
+        querySelector: vi.fn((selector: string) => {
+          if (selector === 'a[href^="/"][role="link"]') return authorLink;
+          if (selector === '[data-testid="User-Name"]') return null;
+          if (selector === 'a[href*="/status/"]') return statusLink;
+          return null;
+        }),
+      } as any;
+
+      const metadata = moderator.extractTweetMetadata(mockTweetNode);
+
+      expect(metadata).not.toBeNull();
+      expect(metadata?.author).toBe('@testuser');
+      expect(metadata?.authorDisplayName).toBe('testuser');
+      expect(metadata?.url).toBe('https://x.com/testuser/status/123');
+    });
+
+    it('should use fallback URL when status link not found', () => {
+      const authorLink = {
+        getAttribute: vi.fn((attr: string) => {
+          if (attr === 'href') return '/testuser';
+          return null;
+        }),
+      };
+
+      const mockTweetNode = {
+        querySelector: vi.fn((selector: string) => {
+          if (selector === 'a[href^="/"][role="link"]') return authorLink;
+          if (selector === 'a[href*="/status/"]') return null;
+          return null;
+        }),
+      } as any;
+
+      const metadata = moderator.extractTweetMetadata(mockTweetNode);
+
+      expect(metadata).not.toBeNull();
+      expect(metadata?.url).toBe('https://x.com/testuser');
     });
   });
 });

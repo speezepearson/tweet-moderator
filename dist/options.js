@@ -12593,16 +12593,48 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     toxic: external_exports.boolean(),
     timestamp: external_exports.number()
   });
+  var PersistentCacheEntrySchema = external_exports.object({
+    toxic: external_exports.boolean(),
+    timestamp: external_exports.number(),
+    reasoning: external_exports.string().optional()
+    // Full AI response text
+  });
   var PersistentCacheSchema = external_exports.record(
     external_exports.string(),
     // hash
-    external_exports.object({
-      toxic: external_exports.boolean(),
-      timestamp: external_exports.number()
-    })
+    PersistentCacheEntrySchema
   );
+  var TweetMetadataSchema = external_exports.object({
+    url: external_exports.string(),
+    author: external_exports.string(),
+    // @username
+    authorDisplayName: external_exports.string()
+  });
+  var FeedbackEntrySchema = external_exports.object({
+    hash: TweetHashSchema,
+    text: external_exports.string(),
+    url: external_exports.string(),
+    author: external_exports.string(),
+    // @username
+    authorDisplayName: external_exports.string(),
+    timestamp: external_exports.number(),
+    aiSaidToxic: external_exports.boolean(),
+    aiReasoning: external_exports.string(),
+    userSaysToxic: external_exports.boolean(),
+    userExplanation: external_exports.string()
+  });
+  var FeedbackError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "FeedbackError";
+    }
+  };
 
   // src/storage.ts
+  async function getLocalStorage(keysOrKey) {
+    const keys = Array.isArray(keysOrKey) ? keysOrKey : [keysOrKey];
+    return chrome.storage.local.get(keys);
+  }
   async function setLocalStorage(items) {
     return chrome.storage.local.set(items);
   }
@@ -12612,6 +12644,116 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   }
   async function setSyncStorage(items) {
     return chrome.storage.sync.set(items);
+  }
+
+  // src/FeedbackManager.ts
+  var FeedbackManager = class {
+    /**
+     * @param maxEntries - Maximum number of feedback entries to keep (default: 200)
+     * @param maxStorageSize - Maximum storage size in bytes (default: 2MB, well under 10MB limit)
+     */
+    constructor(maxEntries = 200, maxStorageSize = 2e6) {
+      this.maxEntries = maxEntries;
+      this.maxStorageSize = maxStorageSize;
+    }
+    /**
+     * Adds a feedback entry to storage
+     * Performs FIFO eviction if needed
+     *
+     * @param entry - The feedback entry to add
+     */
+    async addFeedback(entry) {
+      const entries = await this.loadFeedback();
+      entries.push(entry);
+      await this.evictIfNeeded(entries);
+      await this.saveFeedback(entries);
+    }
+    /**
+     * Retrieves all feedback entries
+     *
+     * @returns Array of feedback entries, sorted by timestamp (oldest first)
+     */
+    async getAllFeedback() {
+      return this.loadFeedback();
+    }
+    /**
+     * Deletes a specific feedback entry by hash
+     *
+     * @param hash - The tweet hash to delete feedback for
+     */
+    async deleteFeedback(hash2) {
+      const entries = await this.loadFeedback();
+      const filtered = entries.filter((entry) => entry.hash !== hash2);
+      await this.saveFeedback(filtered);
+    }
+    /**
+     * Clears all feedback entries
+     */
+    async clearAllFeedback() {
+      await setLocalStorage({ userFeedback: [] });
+    }
+    /**
+     * Returns the current number of feedback entries
+     */
+    async getFeedbackCount() {
+      const entries = await this.loadFeedback();
+      return entries.length;
+    }
+    /**
+     * Returns the current storage size in bytes
+     */
+    async getStorageSize() {
+      const entries = await this.loadFeedback();
+      return JSON.stringify(entries).length;
+    }
+    /**
+     * Loads feedback entries from chrome.storage.local
+     * Returns empty array if not found or invalid
+     */
+    async loadFeedback() {
+      const result = await getLocalStorage("userFeedback");
+      const entries = result.userFeedback || [];
+      if (!Array.isArray(entries)) {
+        console.warn("Invalid feedback structure in storage, resetting");
+        return [];
+      }
+      return entries;
+    }
+    /**
+     * Saves feedback entries to chrome.storage.local
+     */
+    async saveFeedback(entries) {
+      try {
+        await setLocalStorage({ userFeedback: entries });
+      } catch (error46) {
+        throw new FeedbackError(
+          `Failed to save feedback to storage: ${error46 instanceof Error ? error46.message : String(error46)}`
+        );
+      }
+    }
+    /**
+     * Evicts oldest entries if count or size limits are exceeded
+     * Uses FIFO based on timestamp
+     */
+    async evictIfNeeded(entries) {
+      while (entries.length > this.maxEntries) {
+        entries.sort((a, b) => a.timestamp - b.timestamp);
+        entries.shift();
+      }
+      let currentSize = JSON.stringify(entries).length;
+      while (currentSize > this.maxStorageSize && entries.length > 0) {
+        entries.sort((a, b) => a.timestamp - b.timestamp);
+        entries.shift();
+        currentSize = JSON.stringify(entries).length;
+      }
+    }
+  };
+  var globalFeedbackManager = null;
+  function getFeedbackManager() {
+    if (!globalFeedbackManager) {
+      globalFeedbackManager = new FeedbackManager();
+    }
+    return globalFeedbackManager;
   }
 
   // src/lib.ts
@@ -12636,13 +12778,9 @@ I'm going to give you a tweet. Please check whether it does any of the following
 (Tip: ABSOLUTELY DO NOT start by writing your conclusion! As a large language model, every word you write is further opportunity for you to think!
 There's no time pressure; think as much as you need to, in order to come to the correct conclusion.
 Then end your response with '${keywords.bad}' or '${keywords.good}' indicating whether the tweet does any of these things.)
-
-
-Here is the tweet:
-
 `
   };
-  async function getSystemPrompt() {
+  async function getBaseTweetPrefix() {
     const result = await getSyncStorage("tweetPrefix");
     const tweetPrefix = result.tweetPrefix || defaultSettings.tweetPrefix;
     if (typeof tweetPrefix !== "string") {
@@ -12677,7 +12815,7 @@ Here is the tweet:
       return;
     }
     try {
-      const currentPrefix = await getSystemPrompt();
+      const currentPrefix = await getBaseTweetPrefix();
       tweetPrefixField.value = currentPrefix;
     } catch (error46) {
       console.error("Error loading settings:", error46);
@@ -12719,6 +12857,94 @@ Here is the tweet:
           console.error("Error clearing cache:", error46);
           cacheStatus.textContent = `Failed to clear cache: ${error46 instanceof Error ? error46.message : String(error46)}`;
           cacheStatus.style.color = "red";
+        }
+      });
+    }
+    const feedbackManager = getFeedbackManager();
+    const feedbackList = document.getElementById("feedback-list");
+    const feedbackStats = document.getElementById("feedback-stats");
+    const refreshFeedbackBtn = document.getElementById("refresh-feedback-btn");
+    const clearFeedbackBtn = document.getElementById("clear-feedback-btn");
+    async function loadFeedback() {
+      if (!feedbackList || !feedbackStats) return;
+      try {
+        const entries = await feedbackManager.getAllFeedback();
+        const count = entries.length;
+        const corrections = entries.filter((e) => e.aiSaidToxic !== e.userSaysToxic).length;
+        const confirmations = count - corrections;
+        feedbackStats.textContent = `Total: ${count} entries (${corrections} corrections, ${confirmations} confirmations)`;
+        if (count === 0) {
+          feedbackList.innerHTML = '<p style="color: #999; text-align: center;">No feedback entries yet. Use the "AI Feedback" button on tweets to provide feedback.</p>';
+          return;
+        }
+        feedbackList.innerHTML = entries.map((entry, index) => {
+          const userDisagreed = entry.aiSaidToxic !== entry.userSaysToxic;
+          const aiClassification = entry.aiSaidToxic ? "Toxic" : "Not Toxic";
+          const correctClassification = entry.userSaysToxic ? "Toxic" : "Not Toxic";
+          const date5 = new Date(entry.timestamp).toLocaleString();
+          const entryType = userDisagreed ? "CORRECTION" : "CONFIRMATION";
+          const bgColor = userDisagreed ? "#fff3cd" : "#d1ecf1";
+          return `
+            <div style="border: 1px solid #ddd; padding: 12px; margin-bottom: 10px; border-radius: 4px; background-color: ${bgColor};">
+              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                <strong style="color: ${userDisagreed ? "#856404" : "#0c5460"};">${entryType} #${index + 1}</strong>
+                <small style="color: #666;">${date5}</small>
+              </div>
+              <div style="margin-bottom: 8px;">
+                <strong>Tweet:</strong> "${entry.text.substring(0, 100)}${entry.text.length > 100 ? "..." : ""}"
+              </div>
+              <div style="margin-bottom: 8px;">
+                <strong>Author:</strong> ${entry.authorDisplayName} (${entry.author})
+                <a href="${entry.url}" target="_blank" style="margin-left: 8px; font-size: 12px;">View</a>
+              </div>
+              <div style="margin-bottom: 8px;">
+                <strong>AI said:</strong> ${aiClassification} \u2192 <strong>User says:</strong> ${correctClassification}
+              </div>
+              ${entry.userExplanation !== "(No explanation provided)" ? `
+                <div style="margin-bottom: 8px; padding: 8px; background-color: rgba(255,255,255,0.5); border-radius: 4px;">
+                  <strong>Explanation:</strong> ${entry.userExplanation}
+                </div>
+              ` : ""}
+              <button data-hash="${entry.hash}" class="delete-feedback-btn" style="font-size: 12px; padding: 4px 8px; cursor: pointer;">Delete</button>
+            </div>
+          `;
+        }).join("");
+        const deleteButtons = feedbackList.querySelectorAll(".delete-feedback-btn");
+        deleteButtons.forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const target = e.target;
+            const hash2 = target.getAttribute("data-hash");
+            if (!hash2 || !confirm("Delete this feedback entry?")) return;
+            try {
+              await feedbackManager.deleteFeedback(hash2);
+              await loadFeedback();
+            } catch (error46) {
+              console.error("Error deleting feedback:", error46);
+              alert(`Failed to delete feedback: ${error46 instanceof Error ? error46.message : String(error46)}`);
+            }
+          });
+        });
+      } catch (error46) {
+        console.error("Error loading feedback:", error46);
+        feedbackList.innerHTML = `<p style="color: red;">Error loading feedback: ${error46 instanceof Error ? error46.message : String(error46)}</p>`;
+      }
+    }
+    loadFeedback();
+    if (refreshFeedbackBtn) {
+      refreshFeedbackBtn.addEventListener("click", loadFeedback);
+    }
+    if (clearFeedbackBtn) {
+      clearFeedbackBtn.addEventListener("click", async () => {
+        if (!confirm("Are you sure you want to delete ALL feedback entries? This cannot be undone.")) {
+          return;
+        }
+        try {
+          await feedbackManager.clearAllFeedback();
+          await loadFeedback();
+          alert("All feedback cleared successfully.");
+        } catch (error46) {
+          console.error("Error clearing feedback:", error46);
+          alert(`Failed to clear feedback: ${error46 instanceof Error ? error46.message : String(error46)}`);
         }
       });
     }

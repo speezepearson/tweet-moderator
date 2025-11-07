@@ -1,4 +1,4 @@
-import { CacheError, PersistentCache, PersistentCacheSchema, TweetHash } from './types';
+import { CacheError, PersistentCache, PersistentCacheEntry, PersistentCacheSchema, TweetHash } from './types';
 import { getLocalStorage, setLocalStorage } from './storage';
 
 /**
@@ -48,13 +48,26 @@ export class CacheManager {
   }
 
   /**
+   * Retrieves the full cache entry including reasoning for a tweet hash
+   * Only checks persistent storage (reasoning not stored in memory cache)
+   *
+   * @param hash - The tweet hash to lookup
+   * @returns The full cache entry, or undefined if not cached
+   */
+  async getEntry(hash: TweetHash): Promise<PersistentCacheEntry | undefined> {
+    const persistentCache = await this.loadPersistentCache();
+    return persistentCache[hash];
+  }
+
+  /**
    * Stores a toxicity result for a tweet hash
    * Updates both memory and persistent caches
    *
    * @param hash - The tweet hash
    * @param toxic - Whether the tweet is toxic
+   * @param reasoning - Optional AI reasoning for the classification
    */
-  async set(hash: TweetHash, toxic: boolean): Promise<void> {
+  async set(hash: TweetHash, toxic: boolean, reasoning?: string): Promise<void> {
     // Update memory cache
     this.memoryCache.set(hash, toxic);
 
@@ -63,6 +76,7 @@ export class CacheManager {
     persistentCache[hash] = {
       toxic,
       timestamp: Date.now(),
+      ...(reasoning ? { reasoning } : {}),
     };
 
     // Evict oldest entries if cache is too large
