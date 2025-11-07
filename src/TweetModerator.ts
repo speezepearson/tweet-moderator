@@ -119,10 +119,6 @@ export class TweetModerator {
    * @returns true if toxic, false otherwise
    */
   async isTweetToxic(text: string): Promise<boolean> {
-    if (text.includes('Unfortunately your impression is mistaken')) {
-      await new Promise(r => setTimeout(()=>r(null), 5000));
-      return false;
-    }
     // Parse and validate tweet
     const parseResult = TweetSchema.safeParse(text);
     if (!parseResult.success) {
